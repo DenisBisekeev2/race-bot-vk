@@ -89,7 +89,74 @@ def show_menu(message):
         keyboard.add_button("🏎️ Создать гонку", VkKeyboardColor.PRIMARY, payload={'cmd': 'create_race'})
 
     message.reply(text, keyboard=keyboard.get_keyboard())
+# В myfunctions.py добавляем:
 
+def handle_db_command(message):
+    """Обработка команды /db - отправка файлов БД"""
+    # Проверяем, является ли пользователь админом
+    db = load_data("admin.json")
+    if str(message.from_id) not in db['moders']['users_ids']:
+        return 
+        
+    
+    # Список файлов для отправки
+    db_files = [
+        'users.json',
+        'admin.json', 
+        'payments.json',
+        'chats.json'
+    ]
+    
+    # Добавляем файлы, которые могут существовать
+    optional_files = ['global_races.json', 'klans.json']
+    
+    text = "📁 ФАЙЛЫ БАЗ ДАННЫХ\n\n"
+    sent_count = 0
+    
+    for file_name in db_files:
+        try:
+            if os.path.exists(file_name):
+                # Отправляем файл
+                upload = vk_api.VkUpload(message.vk)
+                doc = upload.document_message(
+                    file_name,
+                    peer_id=message.peer_id,
+                    title=f"DB: {file_name}"
+                )
+                
+                if doc:
+                    attachment = f"doc{doc['doc']['owner_id']}_{doc['doc']['id']}"
+                    message.reply(f"✅ {file_name}", attachment=attachment)
+                    sent_count += 1
+                    time.sleep(1)  # Задержка между отправками
+            else:
+                text += f"❌ {file_name} - файл не найден\n"
+        except Exception as e:
+            text += f"❌ {file_name} - ошибка: {str(e)[:50]}\n"
+    
+    # Пробуем отправить опциональные файлы
+    for file_name in optional_files:
+        try:
+            if os.path.exists(file_name):
+                upload = vk_api.VkUpload(message.vk)
+                doc = upload.document_message(
+                    file_name,
+                    peer_id=message.peer_id,
+                    title=f"DB: {file_name}"
+                )
+                
+                if doc:
+                    attachment = f"doc{doc['doc']['owner_id']}_{doc['doc']['id']}"
+                    message.reply(f"✅ {file_name}", attachment=attachment)
+                    sent_count += 1
+                    time.sleep(1)
+        except:
+            pass
+    
+    if sent_count > 0:
+        message.reply(f"📊 Отправлено файлов: {sent_count}")
+    else:
+        message.reply("❌ Не удалось отправить ни одного файла!")
 # =============================================================================
 # СИСТЕМА РАБОТ
 # =============================================================================
