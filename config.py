@@ -8,6 +8,7 @@ admins_ids = [819016396, 761815201]
 CONFIRMATION_TOKEN = "f9691f4b"  # Токен из настроек Callback API
 SECRET_KEY = "gonkaWow"  # Секретный ключ из настроек Callback API
 GROUP_ID = 233724428
+GITHUB_API_KEY = "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"
 
 RACE_DISTANCE = 1000
 GLOBAL_RACE_DISTANCE = 1500
