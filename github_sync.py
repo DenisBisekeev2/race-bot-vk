@@ -1,125 +1,235 @@
+#!/usr/bin/env python3
+"""
+GitHub синхронизация через requests (простая и надежная)
+"""
 import json
 import time
+import base64
 import schedule
 import threading
-from github import Github, GithubException
 import os
+import requests
 from datetime import datetime
-import traceback
+from typing import List, Dict, Optional
 
 class GitHubSync:
     """
-    Класс для автоматической синхронизации JSON файлов с GitHub
+    Простой класс для синхронизации файлов с GitHub через REST API
     """
     
-    def __init__(self, github_token, repo_name, files_to_sync, branch="main"):
+    def __init__(self, github_token: str, repo_name: str, files_to_sync: List[str], branch: str = "main"):
         """
-        Инициализация синхронизатора
+        Инициализация
         
         Args:
-            github_token: GitHub API токен
-            repo_name: Название репозитория (username/repo)
-            files_to_sync: Список файлов для синхронизации
-            branch: Ветка GitHub
+            github_token: GitHub Personal Access Token
+            repo_name: username/repository
+            files_to_sync: список файлов для синхронизации
+            branch: ветка Git
         """
-        self.github_token = github_token
+        self.token = github_token
         self.repo_name = repo_name
         self.files_to_sync = files_to_sync
         self.branch = branch
         self.is_running = False
         self.scheduler_thread = None
         
-        # Инициализируем GitHub клиент
-        try:
-            self.g = Github(github_token)
-            self.repo = self.g.get_repo(repo_name)
-            print(f"✅ GitHubSync подключен к репозиторию: {repo_name}")
-        except Exception as e:
-            print(f"❌ Ошибка подключения к GitHub: {e}")
-            self.repo = None
+        # Базовые заголовки для всех запросов
+        self.headers = {
+            "Authorization": f"token {self.token}",
+            "Accept": "application/vnd.github.v3+json",
+            "Content-Type": "application/json"
+        }
+        
+        # Базовый URL для API
+        self.api_base = "https://api.github.com"
+        
+        print(f"🔗 GitHubSync инициализирован")
+        print(f"📂 Репозиторий: {self.repo_name}")
+        print(f"📄 Файлов для синхронизации: {len(self.files_to_sync)}")
     
-    def sync_file(self, file_path):
+    def _api_request(self, method: str, endpoint: str, data: Optional[Dict] = None) -> Dict:
         """
-        Синхронизирует один файл с GitHub
+        Базовый запрос к GitHub API
         
         Args:
-            file_path: Путь к локальному файлу
+            method: GET, POST, PUT, DELETE
+            endpoint: часть URL после api.github.com
+            data: данные для отправки
+            
         Returns:
-            bool: Успешно ли обновление
+            Ответ от API в виде словаря
         """
-        if not self.repo:
-            print(f"❌ GitHub не подключен, пропускаю {file_path}")
+        url = f"{self.api_base}/{endpoint}"
+        
+        try:
+            if method.upper() == "GET":
+                response = requests.get(url, headers=self.headers, timeout=10)
+            elif method.upper() == "PUT":
+                response = requests.put(url, headers=self.headers, json=data, timeout=10)
+            elif method.upper() == "POST":
+                response = requests.post(url, headers=self.headers, json=data, timeout=10)
+            elif method.upper() == "DELETE":
+                response = requests.delete(url, headers=self.headers, timeout=10)
+            else:
+                raise ValueError(f"Неподдерживаемый метод: {method}")
+            
+            # Пытаемся разобрать JSON ответ
+            try:
+                result = response.json()
+            except:
+                result = {"_raw": response.text}
+            
+            # Добавляем статус код
+            result["_status"] = response.status_code
+            result["_ok"] = 200 <= response.status_code < 300
+            
+            return result
+            
+        except requests.exceptions.Timeout:
+            return {"_error": "Timeout", "_status": 408, "_ok": False}
+        except requests.exceptions.ConnectionError:
+            return {"_error": "Connection error", "_status": 0, "_ok": False}
+        except Exception as e:
+            return {"_error": str(e), "_status": 0, "_ok": False}
+    
+    def check_connection(self) -> bool:
+        """
+        Проверка подключения к GitHub
+        
+        Returns:
+            bool: успешно ли подключение
+        """
+        print("🔍 Проверка подключения к GitHub...")
+        
+        # 1. Проверка пользователя
+        user_result = self._api_request("GET", "user")
+        if not user_result.get("_ok"):
+            print(f"❌ Ошибка проверки пользователя: {user_result.get('_error', user_result)}")
+            return False
+        
+        print(f"✅ Подключен как: {user_result.get('login', 'Unknown')}")
+        
+        # 2. Проверка репозитория
+        repo_result = self._api_request("GET", f"repos/{self.repo_name}")
+        if not repo_result.get("_ok"):
+            print(f"❌ Ошибка доступа к репозиторию: {repo_result.get('message', 'Unknown error')}")
+            print(f"   Проверьте: существует ли репозиторий '{self.repo_name}'?")
+            print(f"   Есть ли у вас права на запись?")
+            return False
+        
+        print(f"✅ Репозиторий доступен: {repo_result.get('full_name', self.repo_name)}")
+        print(f"📝 Описание: {repo_result.get('description', 'нет')}")
+        print(f"🔒 Приватный: {repo_result.get('private', 'unknown')}")
+        
+        return True
+    
+    def get_file_sha(self, file_path: str) -> Optional[str]:
+        """
+        Получить SHA хэш файла на GitHub
+        
+        Args:
+            file_path: путь к файлу в репозитории
+            
+        Returns:
+            SHA хэш файла или None если файл не существует
+        """
+        result = self._api_request(
+            "GET", 
+            f"repos/{self.repo_name}/contents/{file_path}?ref={self.branch}"
+        )
+        
+        if result.get("_status") == 404:
+            return None  # Файл не существует
+        
+        if result.get("_ok") and "sha" in result:
+            return result["sha"]
+        
+        return None
+    
+    def sync_file(self, file_path: str) -> bool:
+        """
+        Синхронизировать один файл
+        
+        Args:
+            file_path: путь к локальному файлу
+            
+        Returns:
+            bool: успешно ли синхронизировано
+        """
+        if not os.path.exists(file_path):
+            print(f"❌ Локальный файл не найден: {file_path}")
             return False
         
         try:
             # Читаем локальный файл
-            if not os.path.exists(file_path):
-                print(f"❌ Локальный файл не найден: {file_path}")
-                return False
-            
             with open(file_path, 'r', encoding='utf-8') as f:
-                local_content = f.read()
+                content = f.read()
             
-            # Проверяем, изменился ли файл
-            try:
-                # Получаем информацию о файле на GitHub
-                github_file = self.repo.get_contents(file_path, ref=self.branch)
-                
-                # Если контент одинаковый, пропускаем
-                if github_file.decoded_content.decode('utf-8') == local_content:
-                    print(f"⏭️  Файл {file_path} не изменился, пропускаю")
-                    return True
-                
-                # Обновляем файл
-                self.repo.update_file(
-                    path=file_path,
-                    message=f"🔄 Автосинхронизация: {file_path} ({datetime.now().strftime('%H:%M:%S')})",
-                    content=local_content,
-                    sha=github_file.sha,
-                    branch=self.branch
-                )
-                print(f"✅ Обновлен: {file_path}")
-                
-            except GithubException as e:
-                # Если файл не существует на GitHub, создаем его
-                if e.status == 404:
-                    self.repo.create_file(
-                        path=file_path,
-                        message=f"📄 Создан: {file_path} ({datetime.now().strftime('%H:%M:%S')})",
-                        content=local_content,
-                        branch=self.branch
-                    )
-                    print(f"📄 Создан новый файл: {file_path}")
-                else:
-                    raise e
+            # Кодируем в base64
+            content_b64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
             
-            return True
+            # Получаем SHA существующего файла
+            sha = self.get_file_sha(file_path)
             
+            # Подготавливаем данные для отправки
+            data = {
+                "message": f"🔄 Автосинхронизация: {file_path} ({datetime.now().strftime('%H:%M:%S')})",
+                "content": content_b64,
+                "branch": self.branch
+            }
+            
+            if sha:
+                # Обновляем существующий файл
+                data["sha"] = sha
+                endpoint = f"repos/{self.repo_name}/contents/{file_path}"
+                method = "PUT"
+                action = "обновлен"
+            else:
+                # Создаем новый файл
+                endpoint = f"repos/{self.repo_name}/contents/{file_path}"
+                method = "PUT"
+                action = "создан"
+            
+            # Отправляем запрос
+            result = self._api_request(method, endpoint, data)
+            
+            if result.get("_ok"):
+                print(f"✅ Файл {file_path} {action} на GitHub")
+                return True
+            else:
+                error_msg = result.get("message", result.get("_error", "Unknown error"))
+                print(f"❌ Ошибка синхронизации {file_path}: {error_msg}")
+                return False
+                
         except Exception as e:
-            print(f"❌ Ошибка синхронизации {file_path}: {str(e)}")
+            print(f"❌ Исключение при синхронизации {file_path}: {str(e)}")
             return False
     
     def sync_all_files(self):
         """
-        Синхронизирует все файлы из списка
+        Синхронизировать все файлы из списка
         """
-        if not self.repo:
+        if not self.check_connection():
+            print("❌ Не удалось подключиться к GitHub, пропускаю синхронизацию")
             return
         
-        print(f"\n🔄 Начинаю синхронизацию с GitHub... {datetime.now().strftime('%H:%M:%S')}")
+        print(f"\n🔄 Начинаю синхронизацию... {datetime.now().strftime('%H:%M:%S')}")
         
-        results = {"success": 0, "failed": 0, "skipped": 0}
+        results = {"success": 0, "failed": 0}
         
         for file_path in self.files_to_sync:
-            result = self.sync_file(file_path)
-            if result:
+            if self.sync_file(file_path):
                 results["success"] += 1
             else:
                 results["failed"] += 1
+            
+            # Небольшая пауза между файлами
+            time.sleep(0.5)
         
         print(f"📊 Результат: {results['success']} успешно, {results['failed']} ошибок")
         
-        # Если есть ошибки, пробуем повторно через 30 секунд
+        # Если были ошибки, пробуем через 30 секунд
         if results["failed"] > 0:
             print("🔄 Повторная попытка через 30 секунд...")
             time.sleep(30)
@@ -127,15 +237,20 @@ class GitHubSync:
             for file_path in self.files_to_sync:
                 self.sync_file(file_path)
     
-    def start_auto_sync(self, interval_minutes=10):
+    def start_auto_sync(self, interval_minutes: int = 10):
         """
-        Запускает автоматическую синхронизацию
+        Запустить автоматическую синхронизацию
         
         Args:
-            interval_minutes: Интервал в минутах
+            interval_minutes: интервал в минутах
         """
         if self.is_running:
             print("⚠️  Автосинхронизация уже запущена")
+            return
+        
+        # Проверяем подключение
+        if not self.check_connection():
+            print("❌ Не могу запустить автосинхронизацию: нет подключения к GitHub")
             return
         
         print(f"⏰ Автосинхронизация запущена (каждые {interval_minutes} минут)")
@@ -159,7 +274,7 @@ class GitHubSync:
     
     def stop_auto_sync(self):
         """
-        Останавливает автоматическую синхронизацию
+        Остановить автоматическую синхронизацию
         """
         self.is_running = False
         if self.scheduler_thread:
@@ -168,7 +283,58 @@ class GitHubSync:
     
     def manual_sync(self):
         """
-        Ручная синхронизация (можно вызывать по команде)
+        Ручная синхронизация
         """
-        print("🔄 Ручная синхронизация...")
+        print("🔄 Запуск ручной синхронизации...")
         return self.sync_all_files()
+
+
+# Простая утилита для быстрой проверки
+def test_github_connection():
+    """
+    Тестирование подключения к GitHub
+    """
+    print("🧪 Тестирование подключения к GitHub")
+    
+    # Импортируем конфигурацию
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    
+    try:
+        from config import GITHUB_API_KEY
+        from github_sync_config import GITHUB_REPO, FILES_TO_SYNC
+        
+        print(f"🔑 Токен: {GITHUB_API_KEY[:10]}...")
+        print(f"📂 Репозиторий: {GITHUB_REPO}")
+        print(f"📄 Файлы: {FILES_TO_SYNC}")
+        
+        # Создаем синхронизатор
+        sync = GitHubSync(
+            github_token=GITHUB_API_KEY,
+            repo_name=GITHUB_REPO,
+            files_to_sync=["test.json"]  # Тестовый файл
+        )
+        
+        # Проверяем подключение
+        if sync.check_connection():
+            print("\n🎉 Всё работает отлично!")
+            return True
+        else:
+            print("\n❌ Есть проблемы с подключением")
+            return False
+            
+    except ImportError as e:
+        print(f"❌ Ошибка импорта: {e}")
+        print("Убедитесь, что файлы config.py и github_sync_config.py существуют")
+        return False
+    except Exception as e:
+        print(f"❌ Неожиданная ошибка: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+if __name__ == "__main__":
+    # Запуск теста при прямом выполнении файла
+    test_github_connection()
