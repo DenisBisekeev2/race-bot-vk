@@ -310,100 +310,90 @@ def index():
         user_data = get_user_by_id(user_id)
     return render_template('index.html', user=user_data, user_id=user_id)
 
-@app.route('/login', methods=['GET', 'POST'])
+@app.route('/login', methods=['GET'])
 def login():
-    """Авторизация по user_id"""
-    print(f"[LOGIN] Метод: {request.method}, Сессия: {session.get('user_id')}")
-    
+    """Страница входа через VK ID"""
     # Если уже авторизован - на dashboard
     if 'user_id' in session:
         return redirect(url_for('dashboard'))
     
-    if request.method == 'POST':
-        user_id = request.form.get('user_id')
-        print(f"[LOGIN] POST запрос для user_id: {user_id}")
+    # Генерируем nonce для CSP (если нужно)
+    import secrets
+    csp_nonce = secrets.token_hex(16)
+    
+    return render_template('login.html', csp_nonce=csp_nonce)
+import requests
+
+@app.route('/callback')
+def callback():
+    """Callback URL для VK ID (перенаправление после успешной авторизации)"""
+    return redirect(url_for('login'))
+
+@app.route('/vk_auth', methods=['POST'])
+def vk_auth():
+    """Обработка токена от VK ID и авторизация пользователя"""
+    try:
+        data = request.json
+        access_token = data.get('token')
         
-        if not user_id:
-            flash('Введите ваш VK ID', 'error')
-            return redirect(url_for('login'))
+        if not access_token:
+            return jsonify({'success': False, 'error': 'Токен не предоставлен'})
         
-        # Проверяем существование пользователя
-        user_data = get_user_by_id(user_id)
-        if not user_data:
-            flash('Пользователь с таким ID не найден в базе бота', 'error')
-            return redirect(url_for('login'))
-        
-        # ПРОВЕРЯЕМ: может пользователь уже подтвердил вход ранее?
-        if str(user_id) in database_login and database_login[str(user_id)].get('status') == 'success':
-            print(f"[LOGIN] Пользователь {user_id} уже подтвердил вход, логиним автоматически")
-            # Автоматически логиним
-            session['user_id'] = user_id
-            session.permanent = True
-            
-            # Очищаем временные данные
-            del database_login[str(user_id)]
-            
-            flash(f'✅ Добро пожаловать, {user_data.get("username", user_id)}!', 'success')
-            return redirect(url_for('dashboard'))
-        
-        # Если не подтвердил - отправляем кнопку
-        keyboard = VkKeyboard(inline=True)
-        keyboard.add_callback_button(
-            "✅ Подтвердить вход", 
-            VkKeyboardColor.POSITIVE, 
-            payload={'cmd': 'login'}
-        )
-        
-        # Сохраняем запрос
-        database_login[str(user_id)] = {
-            'status': 'pending',
-            'timestamp': time.time(),
-            'username': user_data.get('username', ''),
-            'user_data': user_data
+        # Получаем информацию о пользователе через VK API
+        vk_api_url = 'https://api.vk.com/method/users.get'
+        params = {
+            'access_token': access_token,
+            'v': '5.199'
         }
         
-        print(f"[LOGIN] Сохранен в database_login: {user_id}")
+        response = requests.get(vk_api_url, params=params)
+        user_data = response.json()
         
-        # Отправляем сообщение с кнопкой
-        try:
-            result = vk.messages.send(
-                peer_id=int(user_id),
-                random_id=int(time.time()),
-                message=f"🔐 Подтверждение входа на сайт\n\n"
-                       f"👤 Аккаунт: {user_data.get('username', 'ID: ' + user_id)}\n"
-                       f"💰 Баланс: {user_data.get('money', 0)} руб.\n\n"
-                       f"Для подтверждения нажмите кнопку ниже.\n"
-                       f"⚠️ Если это не вы, проигнорируйте сообщение.",
-                keyboard=keyboard.get_keyboard()
-            )
+        if 'response' in user_data and user_data['response']:
+            vk_user = user_data['response'][0]
+            user_id = vk_user['id']
             
-            print(f"[LOGIN] Сообщение отправлено: {result}")
+            # Проверяем, есть ли пользователь в базе бота
+            user_info = get_user_by_id(user_id)
             
-            flash(
-                f'✅ Запрос отправлен пользователю {user_data.get("username", user_id)}!\n'
-                f'Перейдите в диалог с ботом и нажмите кнопку "Подтвердить вход".\n'
-                f'После подтверждения вы сможете войти на сайт.',
-                'success'
-            )
+            if not user_info:
+                # Создаем нового пользователя
+                users_data = load_data(USERS_DB_FILE)
+                
+                new_user = {
+                    'id': user_id,
+                    'username': f"{vk_user.get('first_name', '')} {vk_user.get('last_name', '')}",
+                    'money': 1000,  # Стартовый капитал
+                    'exp': 0,
+                    'level': 1,
+                    'pistons': 3,
+                    'cars': {},
+                    'active_car': None,
+                    'car_colors': {},
+                    'registration_date': datetime.datetime.now().isoformat(),
+                    'last_activity': datetime.datetime.now().isoformat()
+                }
+                
+                users_data['users'][str(user_id)] = new_user
+                save_data(users_data, USERS_DB_FILE)
+                user_info = new_user
             
-            # Таймер очистки (10 минут)
-            def cleanup(user_id):
-                time.sleep(600)  # 10 минут
-                if str(user_id) in database_login:
-                    print(f"[LOGIN] Очистка данных для {user_id} (таймаут)")
-                    del database_login[str(user_id)]
+            # Сохраняем в сессии
+            session['user_id'] = user_id
+            session['vk_token'] = access_token
+            session.permanent = True
             
-            threading.Thread(target=cleanup, args=(user_id,)).start()
+            return jsonify({
+                'success': True,
+                'user_id': user_id,
+                'username': user_info.get('username')
+            })
+        else:
+            return jsonify({'success': False, 'error': 'Не удалось получить данные пользователя'})
             
-        except Exception as e:
-            print(f"[LOGIN] Ошибка отправки: {e}")
-            flash(f'❌ Ошибка отправки запроса: {str(e)}', 'error')
-        
-        return render_template('login_waiting.html', user_id=user_id)
-    
-    # GET запрос - показываем форму
-    return render_template('login.html')
-
+    except Exception as e:
+        print(f"Ошибка VK ID авторизации: {e}")
+        return jsonify({'success': False, 'error': str(e)})
 @app.route('/check_login_status')
 def check_login_status():
     """API для проверки статуса логина"""
