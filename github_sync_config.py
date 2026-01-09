@@ -7,7 +7,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from config import GITHUB_API_KEY
 
 # Конфигурация GitHub
-GITHUB_REPO = "ваш_логин/название_репозитория"  # Например: "denis123/gonka-bot"
+GITHUB_REPO = "DenisBisekeev2/race-bot-vk"  # Например: "denis123/gonka-bot"
 
 # Файлы для синхронизации (пути относительно корня проекта)
 FILES_TO_SYNC = [
