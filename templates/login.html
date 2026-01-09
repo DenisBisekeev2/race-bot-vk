@@ -27,68 +27,68 @@
                           <script nonce="csp_nonce" src="https://unpkg.com/@vkid/sdk@<3.0.0/dist-sdk/umd/index.js"></script>
                           <script nonce="csp_nonce" type="text/javascript">
                             
-    // Инициализация VK ID
-    document.addEventListener('DOMContentLoaded', function() {
-        if ('VKIDSDK' in window) {
-            const VKID = window.VKIDSDK;
-
-            VKID.Config.init({
-                app: 54417533,
-                redirectUrl: '{{ url_for("vk_auth_callback", _external=True) }}',
-                responseMode: VKID.ConfigResponseMode.Callback,
-                source: VKID.ConfigSource.LOWCODE,
-                scope: 'email',
-            });
-
-            const oneTap = new VKID.OneTap();
-
-            oneTap.render({
-                container: document.getElementById('vk_auth_container'),
-                showAlternativeLogin: false,
-                appearance: {
-                    size: 'medium',
-                    theme: 'dark'
-                }
-            })
-            .on(VKID.WidgetEvents.ERROR, function(error) {
-                console.error('VK ID Error:', error);
-            })
-            .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, function (payload) {
-                const code = payload.code;
-                const deviceId = payload.device_id;
-
-                VKID.Auth.exchangeCode(code, deviceId)
-                    .then(function(data) {
-                        // Отправляем токен на сервер
-                        fetch('{{ url_for("vk_auth") }}', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify({
-                                access_token: data.access_token,
-                                user_id: data.user_id
-                            })
-                        })
-                        .then(response => response.json())
-                        .then(result => {
-                            if (result.success) {
-                                window.location.reload();
-                            } else {
-                                alert('Ошибка авторизации: ' + result.error);
-                            }
-                        })
-                        .catch(error => {
-                            console.error('Error:', error);
-                        });
-                    })
-                    .catch(function(error) {
-                        console.error('Token exchange error:', error);
-                    });
-            });
-        }
-    });
-</script>
+    
+    
+                                    if ('VKIDSDK' in window) {
+                                        const VKID = window.VKIDSDK;
+                            
+                                        VKID.Config.init({
+                                            app: 54417533,
+                                            redirectUrl: '{{ url_for("vk_auth_callback", _external=True) }}',
+                                            responseMode: VKID.ConfigResponseMode.Callback,
+                                            source: VKID.ConfigSource.LOWCODE,
+                                            scope: 'email',
+                                        });
+                            
+                                        const oneTap = new VKID.OneTap();
+                            
+                                        oneTap.render({
+                                            container: document.getElementById('vk_auth_container'),
+                                            showAlternativeLogin: false,
+                                            appearance: {
+                                                size: 'medium',
+                                                theme: 'dark'
+                                            }
+                                        })
+                                        .on(VKID.WidgetEvents.ERROR, function(error) {
+                                            console.error('VK ID Error:', error);
+                                        })
+                                        .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, function (payload) {
+                                            const code = payload.code;
+                                            const deviceId = payload.device_id;
+                            
+                                            VKID.Auth.exchangeCode(code, deviceId)
+                                                .then(function(data) {
+                                                    // Отправляем токен на сервер
+                                                    fetch('{{ url_for("vk_auth") }}', {
+                                                        method: 'POST',
+                                                        headers: {
+                                                            'Content-Type': 'application/json',
+                                                        },
+                                                        body: JSON.stringify({
+                                                            access_token: data.access_token,
+                                                            user_id: data.user_id
+                                                        })
+                                                    })
+                                                    .then(response => response.json())
+                                                    .then(result => {
+                                                        if (result.success) {
+                                                            window.location.reload();
+                                                        } else {
+                                                            alert('Ошибка авторизации: ' + result.error);
+                                                        }
+                                                    })
+                                                    .catch(error => {
+                                                        console.error('Error:', error);
+                                                    });
+                                                })
+                                                .catch(function(error) {
+                                                    console.error('Token exchange error:', error);
+                                                });
+                                        });
+                                    }
+                                });
+                            </script>
                         </div>
                     </div>
                     
