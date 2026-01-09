@@ -1389,6 +1389,8 @@ def handle_message_event(message_data):
         join_klan_battle(message, text.split()[2])
     elif text.startswith("драг"):
         handle_drag_race(message)
+    elif text in ["бэкап", "/бэкап", "backup"]:
+        handle_backup_command(message)
     elif text.startswith("/admin"):
         data = load_data('admin.json')
         if str(message.from_id) in data['moders']['users_ids']:
@@ -1662,38 +1664,63 @@ def handle_button_command(message, cmd, payload):
 # GITHUB СИНХРОНИЗАЦИЯ
 # =============================================================================
 
-from github_sync import GitHubSync
-from github_sync_config import GITHUB_API_KEY, GITHUB_REPO, FILES_TO_SYNC, SYNC_INTERVAL
+# В начале файла после импортов
+from github_backup import GitHubBackup, setup_backup
 
 # Глобальная переменная
-github_sync = None
+github_backup = None
 
-def init_github_sync():
-    """Инициализация GitHub синхронизации"""
-    global github_sync
+def init_github_backup():
+    """Инициализация GitHub бэкапа"""
+    global github_backup
     
     try:
-        print("🔗 Инициализация GitHub синхронизации...")
+        print("🤖 Инициализация GitHub бэкапа...")
         
-        github_sync = GitHubSync(
+        from github_sync_config import GITHUB_API_KEY, GITHUB_REPO, FILES_TO_BACKUP, BACKUP_INTERVAL
+        
+        github_backup = GitHubBackup(
             github_token=GITHUB_API_KEY,
             repo_name=GITHUB_REPO,
-            files_to_sync=FILES_TO_SYNC
+            files_to_backup=FILES_TO_BACKUP
         )
         
-        # Запускаем автосинхронизацию
-        github_sync.start_auto_sync(interval_minutes=SYNC_INTERVAL)
+        # Запускаем авто-бэкап
+        github_backup.start_auto_backup(interval_minutes=BACKUP_INTERVAL)
         
-        print(f"✅ GitHub синхронизация запущена")
+        print(f"✅ GitHub бэкап запущен")
         print(f"📂 Репозиторий: {GITHUB_REPO}")
-        print(f"⏰ Интервал: каждые {SYNC_INTERVAL} минут")
+        print(f"📄 Файлов: {len(FILES_TO_BACKUP)}")
+        print(f"⏰ Интервал: каждые {BACKUP_INTERVAL} минут")
         
         return True
+        
     except Exception as e:
-        print(f"❌ Ошибка инициализации GitHub синхронизации: {e}")
+        print(f"❌ Ошибка инициализации GitHub бэкапа: {e}")
         import traceback
         traceback.print_exc()
         return False
+
+def is_admin(user_id):
+    db = load_data("admin.json")
+    if str(user_id) in db['moders']['users_ids']:
+        return True
+    else:
+        return False
+
+# Добавь команду в бота
+def handle_backup_command(message):
+    """Команда для ручного бэкапа"""
+    if not is_admin(message.from_id):
+        return message.reply("❌ Нет прав!")
+    
+    message.reply("🔄 Запускаю ручной бэкап на GitHub...")
+    
+    if github_backup:
+        github_backup.manual_backup()
+        message.reply("✅ Бэкап завершен!")
+    else:
+        message.reply("❌ Бэкап не инициализирован")
         
 # =============================================================================
 # ЗАПУСК ПРИЛОЖЕНИЯ
@@ -1717,7 +1744,7 @@ if __name__ == '__main__':
     auto_restart.start()
 
     # Инициализируем GitHub синхронизацию
-    init_github_sync()
+    init_github_backup()
     
     # Запускаем Flask приложение
     print("🌐 Веб-сайт запущен по адресу: http://localhost:7000")
