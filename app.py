@@ -1396,6 +1396,8 @@ def handle_message_event(message_data):
             handle_admin_command(message, args)
         else:
             None
+    elif text in ["/github_sync", "синхронизировать", "сохранить на github"]:
+        handle_github_sync_command(message)
     elif text == "айди чата":
         message.reply(message.peer_id)
     elif text.startswith("рассылка"):
@@ -1460,7 +1462,24 @@ def handle_message_event(message_data):
         message.reply(report)
     else:
         unknow_command(message)
-
+def handle_github_sync_command(message):
+    """Обработка команды синхронизации с GitHub"""
+    # Проверяем права (только админы)
+    db = load_data("admin.json")
+    if str(message.from_id) not in db['moders']['users_ids']:
+        return
+    
+    message.reply("🔄 Начинаю ручную синхронизацию с GitHub...")
+    
+    try:
+        if github_sync:
+            github_sync.manual_sync()
+            message.reply("✅ Синхронизация завершена успешно!")
+        else:
+            message.reply("❌ GitHub синхронизация не инициализирована")
+    except Exception as e:
+        message.reply(f"❌ Ошибка синхронизации: {str(e)}")
+        
 def handle_callback_event(event_data):
     """Обработка callback кнопок"""
     try:
@@ -1639,7 +1658,35 @@ def handle_button_command(message, cmd, payload):
         message.reply("❌ Приглашение в клан отклонено.")
     elif cmd == 'klan_top':
         show_klan_top(message)
+# =============================================================================
+# GITHUB СИНХРОНИЗАЦИЯ
+# =============================================================================
 
+from github_sync import GitHubSync
+from github_sync_config import GITHUB_API_KEY, GITHUB_REPO, FILES_TO_SYNC, SYNC_INTERVAL
+
+# Создаем экземпляр синхронизатора
+github_sync = None
+
+def init_github_sync():
+    """Инициализация GitHub синхронизации"""
+    global github_sync
+    
+    try:
+        github_sync = GitHubSync(
+            github_token=GITHUB_API_KEY,
+            repo_name=GITHUB_REPO,
+            files_to_sync=FILES_TO_SYNC
+        )
+        
+        # Запускаем автосинхронизацию
+        github_sync.start_auto_sync(interval_minutes=SYNC_INTERVAL)
+        
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка инициализации GitHub синхронизации: {e}")
+        return False
+        
 # =============================================================================
 # ЗАПУСК ПРИЛОЖЕНИЯ
 # =============================================================================
@@ -1660,6 +1707,9 @@ if __name__ == '__main__':
 
     # Запускаем авто-перезапуск
     auto_restart.start()
+
+    # Инициализируем GitHub синхронизацию
+    init_github_sync()
     
     # Запускаем Flask приложение
     print("🌐 Веб-сайт запущен по адресу: http://localhost:7000")
