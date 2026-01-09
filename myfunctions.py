@@ -59,7 +59,7 @@ def show_menu(message):
     user = db['users'][user_id]
     db_admin = load_data("admin.json")
     moders = db_admin['moders']
-    role = None
+    role = ""
     if str(user_id) in moders:
         status = moders[str(user_id)]['status']
         role = roles[status]
@@ -89,7 +89,7 @@ def show_menu(message):
         keyboard.add_button("🏎️ Создать гонку", VkKeyboardColor.PRIMARY, payload={'cmd': 'create_race'})
 
     message.reply(text, keyboard=keyboard.get_keyboard())
-# В myfunctions.py добавляем:
+
 
 def handle_db_command(message):
     """Обработка команды /db - отправка файлов БД"""
