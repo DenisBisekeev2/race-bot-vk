@@ -7,7 +7,7 @@ python-dotenv==1.0.0
 requests==2.31.0
 
 # Для работы с деньгами/платежами
-yoomoney==0.18.2
+yoomoney==0.1.2
 
 # Для планирования задач
 apscheduler==3.10.4  # Альтернатива schedule
