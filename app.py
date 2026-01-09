@@ -289,6 +289,121 @@ database_login = {}
 # ВСЕ ВАШИ РОУТЫ (ПОЛНОСТЬЮ СОХРАНЕНЫ)
 # =============================================================================
 
+@app.route('/vk_auth', methods=['POST'])
+def vk_auth():
+    """Обработка данных от VK ID"""
+    try:
+        data = request.json
+        access_token = data.get('access_token')
+        vk_user_id = data.get('user_id')
+        
+        if not access_token or not vk_user_id:
+            return jsonify({'success': False, 'error': 'Недостаточно данных'})
+        
+        print(f"[VK AUTH] Получен запрос от пользователя {vk_user_id}")
+        
+        # Проверяем токен через VK API
+        verify_url = 'https://api.vk.com/method/users.get'
+        params = {
+            'access_token': access_token,
+            'v': '5.199'
+        }
+        
+        response = requests.get(verify_url, params=params)
+        verify_data = response.json()
+        
+        if 'response' in verify_data:
+            # Токен валидный, получаем информацию о пользователе
+            user_info_url = 'https://api.vk.com/method/users.get'
+            user_params = {
+                'access_token': access_token,
+                'user_ids': vk_user_id,
+                'fields': 'first_name,last_name,photo_200',
+                'v': '5.199'
+            }
+            
+            user_response = requests.get(user_info_url, params=user_params)
+            user_data = user_response.json()
+            
+            if 'response' in user_data and user_data['response']:
+                user = user_data['response'][0]
+                username = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
+                
+                # Проверяем, есть ли пользователь в нашей базе
+                existing_user = get_user_by_id(vk_user_id)
+                
+                if not existing_user:
+                    # Создаем нового пользователя
+                    print(f"[VK AUTH] Создание нового пользователя {vk_user_id}")
+                    users_data = load_data(USERS_DB_FILE)
+                    
+                    new_user = {
+                        "username": username,
+                        "money": 1000,  # Стартовый баланс
+                        "exp": 0,
+                        "level": 1,
+                        "cars": {
+                            "1": {
+                                "name": "Lada Vesta",
+                                "hp": 106,
+                                "max_speed": 180,
+                                "tire_health": 100,
+                                "durability": 100,
+                                "bought_date": datetime.datetime.now().isoformat()
+                            }
+                        },
+                        "active_car": "1",
+                        "referral_code": f"ref_{vk_user_id}",
+                        "referred_by": None,
+                        "pistons": 0
+                    }
+                    
+                    users_data['users'][str(vk_user_id)] = new_user
+                    save_data(users_data, USERS_DB_FILE)
+                    
+                    print(f"[VK AUTH] Создан новый пользователь: {username} (ID: {vk_user_id})")
+                
+                # Авторизуем пользователя
+                session['user_id'] = vk_user_id
+                session['vk_token'] = access_token
+                session.permanent = True
+                
+                # Сохраняем в базе логинов для совместимости
+                database_login[str(vk_user_id)] = {
+                    'status': 'success',
+                    'timestamp': time.time(),
+                    'username': username
+                }
+                
+                return jsonify({
+                    'success': True,
+                    'user_id': vk_user_id,
+                    'username': username
+                })
+        
+        return jsonify({'success': False, 'error': 'Ошибка проверки токена'})
+        
+    except Exception as e:
+        print(f"[VK AUTH] Ошибка: {e}")
+        import traceback
+        print(f"Трассировка: {traceback.format_exc()}")
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/vk_auth_callback')
+def vk_auth_callback():
+    """Callback URL для VK ID (режим callback)"""
+    # В режиме callback VK ID уже обработал авторизацию через JS
+    # Перенаправляем пользователя обратно
+    return redirect(url_for('index'))
+
+@app.route('/vk_logout')
+def vk_logout():
+    """Выход из системы"""
+    session.clear()
+    flash('Вы успешно вышли из системы!', 'success')
+    return redirect(url_for('index'))
+
+# ДОБАВЬТЕ ЭТУ ФУНКЦИЮ В utility_processor ДЛЯ ПРОВЕРКИ VK ТОКЕНА:
 @app.context_processor
 def utility_processor():
     def check_is_admin(user_id):
@@ -296,10 +411,32 @@ def utility_processor():
 
     def check_can_edit_admins(user_id):
         return can_edit_admins(user_id)
+    
+    def get_vk_user_photo(user_id):
+        """Получение фото пользователя из сессии VK"""
+        if 'vk_token' in session:
+            try:
+                user_info_url = 'https://api.vk.com/method/users.get'
+                params = {
+                    'access_token': session.get('vk_token'),
+                    'user_ids': user_id,
+                    'fields': 'photo_200',
+                    'v': '5.199'
+                }
+                
+                response = requests.get(user_info_url, params=params)
+                data = response.json()
+                
+                if 'response' in data and data['response']:
+                    return data['response'][0].get('photo_200', '')
+            except:
+                pass
+        return ''
 
     return dict(
         is_admin=check_is_admin,
-        can_edit_admins=check_can_edit_admins
+        can_edit_admins=check_can_edit_admins,
+        get_vk_user_photo=get_vk_user_photo
     )
 
 @app.route('/')
@@ -328,100 +465,9 @@ import base64
 import hashlib
 import hmac
 CLIENT_SECRET = "xEbpCw780PwGn5PRw9jC"
-@app.route('/vk_callback')
-def vk_callback():
-    """Callback URL для VK ID - просто редирект на dashboard"""
-    return redirect(url_for('dashboard'))
 
-@app.route('/vk_auth', methods=['POST'])
-def vk_auth():
-    """Обработка авторизации через VK ID (упрощенная версия)"""
-    try:
-        data = request.json
-        code = data.get('code')
-        
-        if not code:
-            print("❌ Нет кода авторизации")
-            return jsonify({'success': False, 'error': 'Код авторизации не получен'})
-        
-        print(f"📱 Получен код авторизации: {code[:10]}...")
-        
-        # Получаем access_token используя код
-        # Для VK ID нужно использовать серверный OAuth flow
-        token_url = 'https://id.vk.com/oauth2/access_token'
-        
-        # Параметры запроса
-        token_params = {
-            'client_id': 54417533,
-            'client_secret': CLIENT_SECRET,  # <-- ЗАМЕНИТЬ НА РЕАЛЬНЫЙ!
-            'redirect_uri': request.host_url.rstrip('/') + '/vk_callback',
-            'code': code,
-            'grant_type': 'authorization_code'
-        }
-        
-        print(f"📤 Отправляем запрос за токеном...")
-        token_response = requests.post(token_url, data=token_params)
-        token_data = token_response.json()
-        
-        print(f"📥 Ответ от VK ID: {token_data}")
-        
-        if 'access_token' not in token_data:
-            error_msg = token_data.get('error_description', token_data.get('error', 'Неизвестная ошибка'))
-            print(f"❌ Ошибка получения токена: {error_msg}")
-            return jsonify({'success': False, 'error': f'Ошибка VK ID: {error_msg}'})
-        
-        access_token = token_data['access_token']
-        user_id = token_data.get('user_id')
-        
-        if not user_id:
-            # Если user_id нет в токене, получаем через API
-            user_info_url = 'https://api.vk.com/method/users.get'
-            user_params = {
-                'access_token': access_token,
-                'v': '5.199'
-            }
-            
-            user_response = requests.get(user_info_url, params=user_params)
-            user_data = user_response.json()
-            
-            print(f"👤 Ответ users.get: {user_data}")
-            
-            if 'response' in user_data and user_data['response']:
-                user_id = user_data['response'][0]['id']
-                first_name = user_data['response'][0].get('first_name', '')
-                last_name = user_data['response'][0].get('last_name', '')
-            else:
-                print(f"❌ Не удалось получить данные пользователя: {user_data}")
-                return jsonify({'success': False, 'error': 'Не удалось получить данные пользователя'})
-        else:
-            # Простой способ - используем только ID
-            first_name = "Пользователь"
-            last_name = f"VK {user_id}"
-        
-        print(f"✅ Получен ID пользователя: {user_id}")
-        
-        # Проверяем, есть ли пользователь в базе бота
-        user_info = get_user_by_id(user_id)
 
-        # Сохраняем в сессии
-        session['user_id'] = user_id
-        session['vk_token'] = access_token
-        session.permanent = True
-        
-        print(f"✅ Пользователь {user_id} авторизован")
-        
-        return jsonify({
-            'success': True,
-            'user_id': user_id,
-            'username': user_info.get('username')
-        })
-        
-    except Exception as e:
-        print(f"❌ Ошибка VK ID авторизации: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)})
-@app.route('/check_login_status')
+
 def check_login_status():
     """API для проверки статуса логина"""
     user_id = request.args.get('user_id')
