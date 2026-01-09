@@ -151,6 +151,23 @@ def handle_vk_message(event):
                     return
             except:
                 pass
+
+        if event['object']['message']['action']:
+            action_type = event['object']['message']['action']['type']
+            
+            # Если бота добавили в чат
+            if action_type == 'chat_invite_user':
+                new_member_id = event['object']['message']['action']['member_id']
+                
+                # Проверяем, добавили ли именно бота (member_id отрицательный для бота)
+                if new_member_id == -int(GROUP_ID):
+                    send_welcome_message(event)
+                    return
+            
+            # Если пользователя добавили в чат
+            elif action_type == 'chat_invite_user' and event['object']['message']['action']['member_id'] > 0:
+                # Можно добавить приветствие нового пользователя
+                pass
         
         # Вызываем существующую функцию обработки сообщений
         handle_message_event(message_data)
@@ -160,6 +177,96 @@ def handle_vk_message(event):
         import traceback
         print(f"Трассировка: {traceback.format_exc()}")
 
+def send_welcome_message(event):
+    """Отправка приветственного сообщения при добавлении в чат"""
+    try:
+        chat_id = event.obj.message['peer_id']
+        
+        # Получаем информацию о чате
+        chat_info = vk.messages.getConversationsById(peer_ids=chat_id)
+        
+        if chat_info and 'items' in chat_info and chat_info['items']:
+            chat_name = chat_info['items'][0].get('chat_settings', {}).get('title', 'этот чат')
+        else:
+            chat_name = 'этот чат'
+        
+        welcome_text = """*all 🏎️ ДОБРО ПОЖАЛОВАТЬ В ГОНОЧНЫЙ БОТ!
+
+Приветствую всех участников чата! 🎉
+
+Я — бот для организации захватывающих гонок и соревнований. Вот что я умею:
+
+🚀 ОСНОВНЫЕ ВОЗМОЖНОСТИ:
+• 🏎️ Создавать гонки прямо в чате
+• 🚗 Покупать и улучшать автомобили
+• ⚔️ Устраивать драг-рейсинг
+• 🏆 Создавать кланы и битвы кланов
+• 💼 Работать автомехаником или таксистом
+
+📋 КОМАНДЫ ДЛЯ ЧАТА:
+• "Гонка" - создать/присоединиться к гонке
+• "Меню" - показать главное меню
+• "Драг @игрок" - вызвать на драг-рейсинг
+• "Клан" - система кланов
+
+👤 ЛИЧНЫЕ СООБЩЕНИЯ:
+Для доступа к полному функционалу (гараж, автосалон, техцентр, PvP гонки) напишите мне в личные сообщения:
+[vk.me/gonka_bot|Написать боту]
+
+🎮 Удачи на треках и пусть победит самый быстрый! 🏁
+
+P.S. Для помощи напишите "Помощь"."""
+
+        keyboard = VkKeyboard(inline=True)
+        keyboard.add_button("🏎️ Создать гонку", VkKeyboardColor.POSITIVE, payload={'cmd': 'create_race'})
+        keyboard.add_line()
+        keyboard.add_button("📋 Команды", VkKeyboardColor.PRIMARY, payload={'cmd': 'show_commands'})
+   
+        
+        # Отправляем сообщение
+        vk.messages.send(
+            peer_id=chat_id,
+            message=welcome_text,
+            keyboard=keyboard.get_keyboard(),
+            random_id=0
+        )
+        
+        # Регистрируем чат в базе данных
+        register_new_chat(chat_id, chat_name)
+        
+        print(f"✅ Бот добавлен в чат {chat_name} (ID: {chat_id})")
+        
+    except Exception as e:
+        print(f"❌ Ошибка отправки приветствия: {e}")
+
+def register_new_chat(chat_id, chat_name):
+    """Регистрация нового чата в базе данных"""
+    try:
+        chats_data = load_data(CHATS_DB_FILE)
+        
+        if str(chat_id) not in chats_data.get('chats', {}):
+            chats_data.setdefault('chats', {})[str(chat_id)] = {
+                'title': chat_name,
+                'premium': False,
+                'registered_date': datetime.datetime.now().isoformat(),
+                'total_races': 0,
+                'welcome_sent': True,
+                'last_activity': datetime.datetime.now().isoformat()
+            }
+            save_data(chats_data, CHATS_DB_FILE)
+            print(f"📝 Чат {chat_name} зарегистрирован в базе")
+            return True
+        else:
+            # Обновляем информацию о чате
+            chats_data['chats'][str(chat_id)]['last_activity'] = datetime.datetime.now().isoformat()
+            chats_data['chats'][str(chat_id)]['welcome_sent'] = True
+            save_data(chats_data, CHATS_DB_FILE)
+            return False
+            
+    except Exception as e:
+        print(f"❌ Ошибка регистрации чата: {e}")
+        return False
+        
 def handle_vk_callback(event):
     """Обработка callback кнопок VK"""
     try:
@@ -1253,6 +1360,8 @@ def handle_message_event(message_data):
         my_results(message)
     elif text in ["выйти из гонки", "покинуть гонку"]:
         leave_race(message)
+    elif text == "/db":
+        handle_db_command(message)
 
     elif text == "мой айди":
         if message.from_id != message.peer_id:
