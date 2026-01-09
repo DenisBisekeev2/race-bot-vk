@@ -3,104 +3,181 @@
 {% block title %}Вход{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-8">
-        <div class="card">
-            <div class="card-header">
-                <h4 class="mb-0"><i class="fas fa-sign-in-alt"></i> Вход через VK ID</h4>
+<div class="row justify-content-center mt-4">
+    <div class="col-md-8 col-lg-6">
+        <div class="car-card p-4">
+            <div class="text-center mb-4">
+                <h2 class="racing-font mb-3" style="font-size: 2.5rem;">
+                    <i class="fas fa-sign-in-alt me-2"></i>ВХОД
+                </h2>
+                <p class="lead">Войдите через VK ID чтобы управлять своим гаражом</p>
             </div>
-            <div class="card-body text-center">
-                <!-- Контейнер для VK ID виджета -->
-                <div id="vk-id-container" class="mb-4">
-                    <div>
-                        <script nonce="{{ csp_nonce }}" src="https://unpkg.com/@vkid/sdk@<3.0.0/dist-sdk/umd/index.js"></script>
-                        <script nonce="{{ csp_nonce }}" type="text/javascript">
-                            if ('VKIDSDK' in window) {
-                                const VKID = window.VKIDSDK;
 
-                                VKID.Config.init({
-                                    app: 54417533, // Ваш App ID
-                                    redirectUrl: window.location.origin + '/callback',
-                                    responseMode: VKID.ConfigResponseMode.Callback,
-                                    source: VKID.ConfigSource.LOWCODE,
-                                    scope: '',
-                                });
-
-                                const oneTap = new VKID.OneTap();
-
-                                oneTap.render({
-                                    container: document.getElementById('vk-id-container'),
-                                    showAlternativeLogin: true,
-                                    styles: {
-                                        borderRadius: 50
-                                    }
-                                })
-                                .on(VKID.WidgetEvents.ERROR, vkidOnError)
-                                .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, function (payload) {
-                                    const code = payload.code;
-                                    const deviceId = payload.device_id;
-
-                                    VKID.Auth.exchangeCode(code, deviceId)
-                                        .then(vkidOnSuccess)
-                                        .catch(vkidOnError);
-                                });
-                            
-                                function vkidOnSuccess(data) {
-                                    // Получаем токен и отправляем на сервер
-                                    const token = data.access_token;
-                                    
-                                    // Отправляем токен на сервер для получения user_id
-                                    fetch('/vk_auth', {
-                                        method: 'POST',
-                                        headers: {
-                                            'Content-Type': 'application/json',
-                                        },
-                                        body: JSON.stringify({
-                                            token: token
-                                        })
-                                    })
-                                    .then(response => response.json())
-                                    .then(data => {
-                                        if (data.success) {
-                                            // Редирект на дашборд
-                                            window.location.href = '/dashboard';
-                                        } else {
-                                            alert('Ошибка авторизации: ' + data.error);
-                                        }
-                                    })
-                                    .catch(error => {
-                                        console.error('Ошибка:', error);
-                                        alert('Произошла ошибка при авторизации');
-                                    });
-                                }
-                            
-                                function vkidOnError(error) {
-                                    console.error('VK ID Error:', error);
-                                    document.getElementById('error-message').innerHTML = 
-                                        'Ошибка авторизации. Пожалуйста, попробуйте еще раз.';
-                                }
-                            }
-                        </script>
+            <!-- Контейнер для VK ID виджета -->
+            <div class="text-center mb-4 p-4 border-gradient rounded-3" id="vk-auth-container">
+                <div class="d-flex flex-column align-items-center">
+                    <div class="mb-3">
+                        <i class="fas fa-car fa-3x text-gradient"></i>
                     </div>
+                    <h4 class="mb-3">Вход через VK ID</h4>
+                    
+                    <!-- Спиннер загрузки -->
+                    <div class="d-flex justify-content-center align-items-center" style="min-height: 60px;">
+                        <div class="spinner-border text-primary" role="status" id="loading-spinner">
+                            <span class="visually-hidden">Загрузка...</span>
+                        </div>
+                        <div id="vk-id-widget" class="w-100"></div>
+                    </div>
+                    
+                    <small class="text-muted mt-2">Безопасный вход через официальный VK ID</small>
                 </div>
+            </div>
 
-                <div id="error-message" class="alert alert-danger d-none"></div>
-
-                <hr>
-
-                <div class="alert alert-info">
-                    <h6><i class="fas fa-info-circle"></i> Как войти?</h6>
-                    <ol class="small">
-                        <li>Нажмите на кнопку "Войти через VK ID" выше</li>
-                        <li>Разрешите доступ приложению</li>
-                        <li>Вы будете автоматически авторизованы</li>
-                        <li>Если у вас нет аккаунта в боте, он будет создан автоматически</li>
-                    </ol>
+            <!-- Сообщения об ошибках/успехе -->
+            <div id="auth-messages">
+                <div id="error-message" class="alert alert-danger d-none">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <span id="error-text"></span>
                 </div>
+                <div id="success-message" class="alert alert-success d-none">
+                    <i class="fas fa-check-circle me-2"></i>
+                    <span id="success-text"></span>
+                </div>
+            </div>
 
-               
+            <div class="text-center mt-4">
+                <div class="d-inline-block pulse">
+                    <i class="fas fa-chevron-down text-gradient"></i>
+                </div>
+            </div>
+
+           
+
+            <!-- Информационный блок -->
+            <div class="alert alert-info mt-4">
+                <h6><i class="fas fa-info-circle me-2"></i> Преимущества VK ID:</h6>
+                <ul class="mb-0 ps-3">
+                    <li>Мгновенный вход без пароля</li>
+                    <li>Высокий уровень безопасности</li>
+                    <li>Автоматическое создание аккаунта в боте</li>
+                    <li>Синхронизация с вашим VK профилем</li>
+                </ul>
             </div>
         </div>
     </div>
 </div>
+
+<!-- VK ID SDK -->
+<script src="https://unpkg.com/@vkid/sdk@2.x/dist/index.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const VKID = window.VKID;
+    
+    // Прячем спиннер через 2 секунды (если виджет не загрузится)
+    setTimeout(() => {
+        document.getElementById('loading-spinner').style.display = 'none';
+    }, 2000);
+    
+    // Инициализация VKID с правильными параметрами
+    try {
+        VKID.Config.set({
+            app: 54417533, // Ваш App ID
+            redirectUrl: window.location.origin + '/vk_callback', // Будет обрабатываться Flask
+            state: 'racebot_auth', // Любая строка для защиты
+            scope: '' // Базовые права - только ID пользователя
+        });
+        
+        console.log('VKID Config установлен');
+        
+        // Создаем виджет OneTap
+        const oneTap = new VKID.OneTap({
+            container: document.getElementById('vk-id-widget'),
+            showAlternativeLogin: true,
+            styles: {
+                borderRadius: 12,
+                height: 48,
+                width: '100%',
+                backgroundColor: '#ff2a00'
+            }
+        });
+        
+        // Обработка успешного входа
+        oneTap.on(VKID.OneTapEvents.LOGIN_SUCCESS, function(event) {
+            console.log('LOGIN_SUCCESS:', event.detail);
+            
+            const code = event.detail.code;
+            
+            // Показываем сообщение об успехе
+            showSuccess('Авторизация...');
+            
+            // Отправляем код на сервер
+            fetch('/vk_auth', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    code: code,
+                    auth_type: 'vk_id'
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Response from server:', data);
+                
+                if (data.success) {
+                    showSuccess('Авторизация успешна! Перенаправление...');
+                    
+                    // Редирект на дашборд
+                    setTimeout(() => {
+                        window.location.href = '/dashboard';
+                    }, 1500);
+                } else {
+                    showError(data.error || 'Ошибка авторизации');
+                }
+            })
+            .catch(error => {
+                console.error('Fetch error:', error);
+                showError('Ошибка соединения с сервером');
+            });
+        });
+        
+        // Обработка ошибок
+        oneTap.on(VKID.OneTapEvents.LOGIN_FAILED, function(event) {
+            console.error('LOGIN_FAILED:', event.detail);
+            showError('Ошибка входа через VK ID');
+        });
+        
+        // Рендерим виджет
+        oneTap.render();
+        
+        // Прячем спиннер после рендера
+        document.getElementById('loading-spinner').style.display = 'none';
+        
+        console.log('VKID виджет инициализирован');
+        
+    } catch (error) {
+        console.error('Ошибка инициализации VKID:', error);
+        document.getElementById('loading-spinner').style.display = 'none';
+        showError('Не удалось загрузить VK ID виджет. Попробуйте обновить страницу.');
+    }
+    
+    // Функции для отображения сообщений
+    function showError(message) {
+        const errorDiv = document.getElementById('error-message');
+        const errorText = document.getElementById('error-text');
+        errorText.textContent = message;
+        errorDiv.classList.remove('d-none');
+        document.getElementById('success-message').classList.add('d-none');
+    }
+    
+    function showSuccess(message) {
+        const successDiv = document.getElementById('success-message');
+        const successText = document.getElementById('success-text');
+        successText.textContent = message;
+        successDiv.classList.remove('d-none');
+        document.getElementById('error-message').classList.add('d-none');
+    }
+});
+</script>
 {% endblock %}
