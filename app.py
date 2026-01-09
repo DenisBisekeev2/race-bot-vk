@@ -1577,6 +1577,8 @@ def handle_button_command(message, cmd, payload):
         show_garage(message)
     elif cmd == 'jobs_menu':
         show_jobs_menu(message)
+    elif cmd == "show_commands":
+        show_commands(message)
     elif cmd == 'start_job':
         job_id = payload.get('job_id')
         if job_id == 'mechanic':
