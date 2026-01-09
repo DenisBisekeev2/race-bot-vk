@@ -327,7 +327,7 @@ import requests
 import base64
 import hashlib
 import hmac
-
+CLIENT_SECRET = "xEbpCw780PwGn5PRw9jC"
 @app.route('/vk_callback')
 def vk_callback():
     """Callback URL для VK ID - просто редирект на dashboard"""
@@ -353,7 +353,7 @@ def vk_auth():
         # Параметры запроса
         token_params = {
             'client_id': 54417533,
-            'client_secret': 'YOUR_CLIENT_SECRET',  # <-- ЗАМЕНИТЬ НА РЕАЛЬНЫЙ!
+            'client_secret': CLIENT_SECRET,  # <-- ЗАМЕНИТЬ НА РЕАЛЬНЫЙ!
             'redirect_uri': request.host_url.rstrip('/') + '/vk_callback',
             'code': code,
             'grant_type': 'authorization_code'
@@ -402,30 +402,7 @@ def vk_auth():
         
         # Проверяем, есть ли пользователь в базе бота
         user_info = get_user_by_id(user_id)
-        
-        if not user_info:
-            # Создаем нового пользователя
-            users_data = load_data(USERS_DB_FILE)
-            
-            new_user = {
-                'id': user_id,
-                'username': f"{first_name} {last_name}".strip(),
-                'money': 1000,
-                'exp': 0,
-                'level': 1,
-                'pistons': 3,
-                'cars': {},
-                'active_car': None,
-                'car_colors': {},
-                'registration_date': datetime.datetime.now().isoformat(),
-                'last_activity': datetime.datetime.now().isoformat()
-            }
-            
-            users_data['users'][str(user_id)] = new_user
-            save_data(users_data, USERS_DB_FILE)
-            user_info = new_user
-            print(f"👤 Создан новый пользователь: {user_id}")
-        
+
         # Сохраняем в сессии
         session['user_id'] = user_id
         session['vk_token'] = access_token
