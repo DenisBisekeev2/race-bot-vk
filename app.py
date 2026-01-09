@@ -1665,7 +1665,7 @@ def handle_button_command(message, cmd, payload):
 from github_sync import GitHubSync
 from github_sync_config import GITHUB_API_KEY, GITHUB_REPO, FILES_TO_SYNC, SYNC_INTERVAL
 
-# Создаем экземпляр синхронизатора
+# Глобальная переменная
 github_sync = None
 
 def init_github_sync():
@@ -1673,6 +1673,8 @@ def init_github_sync():
     global github_sync
     
     try:
+        print("🔗 Инициализация GitHub синхронизации...")
+        
         github_sync = GitHubSync(
             github_token=GITHUB_API_KEY,
             repo_name=GITHUB_REPO,
@@ -1682,9 +1684,15 @@ def init_github_sync():
         # Запускаем автосинхронизацию
         github_sync.start_auto_sync(interval_minutes=SYNC_INTERVAL)
         
+        print(f"✅ GitHub синхронизация запущена")
+        print(f"📂 Репозиторий: {GITHUB_REPO}")
+        print(f"⏰ Интервал: каждые {SYNC_INTERVAL} минут")
+        
         return True
     except Exception as e:
         print(f"❌ Ошибка инициализации GitHub синхронизации: {e}")
+        import traceback
+        traceback.print_exc()
         return False
         
 # =============================================================================
