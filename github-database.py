@@ -66,7 +66,7 @@ def setup_github_updater():
     Настройка автообновления JSON файлов
     """
     # Токен GitHub (нужно создать в настройках GitHub)
-    GITHUB_TOKEN = "ваш_github_token"
+    GITHUB_TOKEN = "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"
     REPO_NAME = "DenisBisekeev2"
     
     # Инициализируем обновлятель
