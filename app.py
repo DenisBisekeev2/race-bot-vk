@@ -1224,6 +1224,14 @@ def handle_message_event(message_data):
     # Обработка текстовых команд
     if text in ["меню", "/start", "start", "начать"]:
         show_menu(message)
+    elif text in ["работы", "работа", "job", "jobs"]:
+        show_jobs_menu(message)
+    elif text.startswith("работа автомеханик"):
+        start_job_mechanic(message)
+    elif text.startswith("работа таксист"):
+        start_job_taxi(message)
+    elif text == "статистика работ":
+        show_job_stats(message)
     elif text in ['помощь', 'команды', 'help']:
         show_commands(message)
     elif text in ['гонка', 'гонки', 'race']:
