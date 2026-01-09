@@ -453,6 +453,20 @@
             color: var(--text-light);
         }
 
+        #vk_auth_container {
+            display: inline-block;
+            vertical-align: middle;
+        }
+        
+        #vk_auth_container iframe {
+            border-radius: 8px !important;
+            overflow: hidden !important;
+        }
+        
+        .vk_id_container {
+            margin: 0 !important;
+        }
+
         /* ПРОГРЕСС БАР */
         .progress {
             background: rgba(255, 255, 255, 0.1);
@@ -546,6 +560,22 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <div class="navbar-nav ms-auto">
                     {% if user %}
+                        <div class="d-flex align-items-center mb-3">
+                            <div class="flex-shrink-0">
+                                {% if get_vk_user_photo(session.user_id) %}
+                                    <img src="{{ get_vk_user_photo(session.user_id) }}" 
+                                         class="rounded-circle" 
+                                         style="width: 50px; height: 50px; object-fit: cover;"
+                                         alt="Аватар">
+                                {% else %}
+                                    <i class="fas fa-user-circle fa-3x text-gradient"></i>
+                                {% endif %}
+                            </div>
+                            <div class="flex-grow-1 ms-3">
+                                <h5 class="mb-0">{{ user.username }}</h5>
+                                <small class="text-muted">ID: {{ session.user_id }}</small>
+                            </div>
+                        </div>
                         <a class="nav-link" href="{{ url_for('dashboard') }}">
                             <i class="fas fa-tachometer-alt"></i> Дэшборд
                         </a>
