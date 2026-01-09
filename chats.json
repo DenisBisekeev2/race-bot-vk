@@ -29,6 +29,14 @@
       "premium": false,
       "registered_date": "2025-11-15T15:04:18.515351",
       "total_races": 0
+    },
+    "2000000010": {
+      "title": "Бот Гонка | Логи",
+      "premium": true,
+      "registered_date": "2026-01-09T:20:56:10.525351",
+      "total_races": 0
     }
+    
+    
   }
 }
