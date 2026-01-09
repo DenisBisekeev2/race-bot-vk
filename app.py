@@ -152,12 +152,12 @@ def handle_vk_message(event):
             except:
                 pass
 
-        if event['object']['message']['action']:
-            action_type = event['object']['message']['action']['type']
+        if event.obj.message.get('action'):
+            action_type = event.obj.message['action']['type']
             
             # Если бота добавили в чат
             if action_type == 'chat_invite_user':
-                new_member_id = event['object']['message']['action']['member_id']
+                new_member_id = event.obj.message['action']['member_id']
                 
                 # Проверяем, добавили ли именно бота (member_id отрицательный для бота)
                 if new_member_id == -int(GROUP_ID):
@@ -165,7 +165,7 @@ def handle_vk_message(event):
                     return
             
             # Если пользователя добавили в чат
-            elif action_type == 'chat_invite_user' and event['object']['message']['action']['member_id'] > 0:
+            elif action_type == 'chat_invite_user' and event.obj.message['action']['member_id'] > 0:
                 # Можно добавить приветствие нового пользователя
                 pass
         
