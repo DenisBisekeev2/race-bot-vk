@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-"""
-GitHub синхронизация через requests (простая и надежная)
-"""
 import json
 import time
 import base64
