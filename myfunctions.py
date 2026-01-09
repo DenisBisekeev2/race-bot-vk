@@ -79,6 +79,7 @@ def show_menu(message):
     keyboard.add_button("🏪 Автосалон", VkKeyboardColor.POSITIVE, payload={'cmd': 'cars_shop'})
     keyboard.add_line()
     keyboard.add_button("🔧 Техцентр", VkKeyboardColor.SECONDARY, payload={'cmd': 'service'})
+    keyboard.add_button("💼 Работы", VkKeyboardColor.POSITIVE, payload={'cmd': 'jobs_menu'})
     keyboard.add_line()
 
     if message.is_private:
@@ -88,6 +89,397 @@ def show_menu(message):
         keyboard.add_button("🏎️ Создать гонку", VkKeyboardColor.PRIMARY, payload={'cmd': 'create_race'})
 
     message.reply(text, keyboard=keyboard.get_keyboard())
+
+# =============================================================================
+# СИСТЕМА РАБОТ
+# =============================================================================
+
+# Конфигурация работ
+JOBS_CONFIG = {
+    "mechanic": {
+        "name": "🚗 Автомеханик",
+        "description": "Ремонт машин в автосервисе",
+        "required_level": 1,
+        "cooldown": 300,  # 5 минут
+        "money_min": 150,
+        "money_max": 400,
+        "exp_reward": 10,
+        "chance_accident": 0.1,  # 10% шанс аварии
+        "special_event_chance": 0.05  # 5% шанс особого события
+    },
+    "taxi": {
+        "name": "🚕 Таксист",
+        "description": "Перевозка пассажиров по городу",
+        "required_level": 2,
+        "cooldown": 240,  # 4 минуты
+        "money_min": 200,
+        "money_max": 500,
+        "exp_reward": 15,
+        "chance_accident": 0.15,  # 15% шанс аварии
+        "special_event_chance": 0.08  # 8% шанс особого события
+    }
+}
+
+# Хранилище cooldown'ов работ
+job_cooldowns = {}
+# Хранилище статистики работ
+job_stats = {}
+
+def show_jobs_menu(message):
+    """Показать меню работ"""
+    db = load_data(USERS_DB_FILE)
+    user_id = str(message.from_id)
+    
+    if user_id not in db.get('users', {}):
+        return message.reply("❌ У вас нет аккаунта в боте! Напишите 'Начать' для регистрации.")
+    
+    user = db['users'][user_id]
+    
+    text = "💼 СИСТЕМА РАБОТ\n\n"
+    text += f"👤 Ваш уровень: {user['level']}\n"
+    text += f"💰 Ваш баланс: {format_number(user['money'])} руб.\n\n"
+    text += "📋 Доступные работы:\n\n"
+    
+    # Проверяем доступные работы
+    available_jobs = []
+    
+    for job_id, job_info in JOBS_CONFIG.items():
+        if user['level'] >= job_info['required_level']:
+            cooldown_key = f"{user_id}_{job_id}"
+            remaining_time = job_cooldowns.get(cooldown_key, 0) - time.time()
+            
+            if remaining_time > 0:
+                time_left = f"⏳ {int(remaining_time // 60)}:{int(remaining_time % 60):02d}"
+                available_jobs.append(f"❌ {job_info['name']} ({time_left})")
+            else:
+                available_jobs.append(f"✅ {job_info['name']}")
+        else:
+            available_jobs.append(f"🔒 {job_info['name']} (нужен уровень {job_info['required_level']}+)")
+    
+    text += "\n".join(available_jobs)
+    text += "\n\n📊 Выберите работу для начала смены:"
+    
+    keyboard = VkKeyboard(inline=True)
+    
+    # Добавляем кнопки для доступных работ
+    row_count = 0
+    for job_id, job_info in JOBS_CONFIG.items():
+        if user['level'] >= job_info['required_level']:
+            cooldown_key = f"{user_id}_{job_id}"
+            remaining_time = job_cooldowns.get(cooldown_key, 0) - time.time()
+            
+            if remaining_time <= 0:
+                if row_count == 2:
+                    keyboard.add_line()
+                    row_count = 0
+                keyboard.add_button(
+                    job_info['name'],
+                    VkKeyboardColor.SECONDARY,
+                    payload={'cmd': 'start_job', 'job_id': job_id}
+                )
+                row_count += 1
+    
+    if row_count > 0:
+        keyboard.add_line()
+    
+    keyboard.add_button("📊 Статистика работ", VkKeyboardColor.PRIMARY, payload={'cmd': 'job_stats'})
+    keyboard.add_button("🏠 Главное меню", VkKeyboardColor.POSITIVE, payload={'cmd': 'menu'})
+    
+    message.reply(text, keyboard=keyboard.get_keyboard())
+
+def start_job_mechanic(message):
+    """Начать работу автомехаником"""
+    user_id = str(message.from_id)
+    cooldown_key = f"{user_id}_mechanic"
+    
+    # Проверяем cooldown
+    current_time = time.time()
+    if cooldown_key in job_cooldowns and job_cooldowns[cooldown_key] > current_time:
+        remaining = job_cooldowns[cooldown_key] - current_time
+        return message.reply(f"⏳ Вы еще устали после предыдущей смены! Отдохните еще {int(remaining // 60)}:{int(remaining % 60):02d}")
+    
+    user_data = load_data(USERS_DB_FILE)
+    user = user_data['users'][user_id]
+    
+    # Проверяем, есть ли у пользователя машина (для механика важно)
+    if not user.get('cars'):
+        return message.reply("❌ Для работы автомехаником нужен хотя бы один автомобиль для практики!")
+    
+    # Генерируем сценарий работы
+    scenarios = [
+        "🔧 Вы заменили масло в двигателе клиента",
+        "🛞 Вы отбалансировали колеса на стенде",
+        "🔩 Вы заменили тормозные колодки",
+        "⚙️ Вы настроили развал-схождение",
+        "💨 Вы почистили топливную систему",
+        "🔋 Вы заменили аккумулятор",
+        "🚗 Вы провели полную диагностику автомобиля"
+    ]
+    
+    scenario = random.choice(scenarios)
+    
+    # Определяем награду
+    base_reward = random.randint(
+        JOBS_CONFIG['mechanic']['money_min'],
+        JOBS_CONFIG['mechanic']['money_max']
+    )
+    
+    # Бонус за уровень
+    level_bonus = int(base_reward * (user['level'] * 0.05))
+    total_reward = base_reward + level_bonus
+    
+    # Проверяем особое событие
+    if random.random() < JOBS_CONFIG['mechanic']['special_event_chance']:
+        special_bonus = random.randint(100, 300)
+        total_reward += special_bonus
+        scenario += f"\n🎉 ОСОБЫЙ ЗАКАЗ! Вы отремонтировали раритетный автомобиль! (+{special_bonus} руб.)"
+    
+    # Проверяем аварию
+    accident_happened = False
+    if random.random() < JOBS_CONFIG['mechanic']['chance_accident']:
+        accident_penalty = random.randint(50, 150)
+        total_reward = max(50, total_reward - accident_penalty)
+        accident_happened = True
+        scenario += f"\n💥 НЕСЧАСТНЫЙ СЛУЧАЙ! Вы случайно повредили деталь клиента (-{accident_penalty} руб.)"
+    
+    # Начисляем награду
+    user['money'] += total_reward
+    user['exp'] += JOBS_CONFIG['mechanic']['exp_reward']
+    
+    # Проверяем повышение уровня
+    levels_gained = check_level_up(user)
+    
+    # Сохраняем данные
+    save_data(user_data, USERS_DB_FILE)
+    
+    # Устанавливаем cooldown
+    job_cooldowns[cooldown_key] = current_time + JOBS_CONFIG['mechanic']['cooldown']
+    
+    # Обновляем статистику
+    update_job_stats(user_id, 'mechanic', total_reward, accident_happened)
+    
+    # Формируем сообщение о результате
+    result_text = f"🛠️ СМЕНА АВТОМЕХАНИКА ЗАВЕРШЕНА!\n\n"
+    result_text += f"{scenario}\n\n"
+    result_text += f"💵 Заработано: {total_reward} руб.\n"
+    result_text += f"📈 Получено опыта: {JOBS_CONFIG['mechanic']['exp_reward']}\n"
+    result_text += f"💰 Новый баланс: {format_number(user['money'])} руб.\n"
+    
+    if levels_gained > 0:
+        result_text += f"\n🎉 ПОВЫШЕНИЕ УРОВНЯ! +{levels_gained} уровень(ей)!\n"
+        result_text += f"💰 Бонус за уровни: +{level_bonus} руб."
+    
+    result_text += f"\n\n⏳ Следующая смена через 5 минут"
+    
+    keyboard = VkKeyboard(inline=True)
+    keyboard.add_button("🛠️ Еще смена", VkKeyboardColor.PRIMARY, payload={'cmd': 'start_job', 'job_id': 'mechanic'})
+    keyboard.add_button("🚕 Таксист", VkKeyboardColor.SECONDARY, payload={'cmd': 'start_job', 'job_id': 'taxi'})
+    keyboard.add_line()
+    keyboard.add_button("💼 Все работы", VkKeyboardColor.POSITIVE, payload={'cmd': 'jobs_menu'})
+    
+    message.reply(result_text, keyboard=keyboard.get_keyboard())
+
+def start_job_taxi(message):
+    """Начать работу таксистом"""
+    user_id = str(message.from_id)
+    cooldown_key = f"{user_id}_taxi"
+    
+    # Проверяем cooldown
+    current_time = time.time()
+    if cooldown_key in job_cooldowns and job_cooldowns[cooldown_key] > current_time:
+        remaining = job_cooldowns[cooldown_key] - current_time
+        return message.reply(f"⏳ Вы еще устали после предыдущей смены! Отдохните еще {int(remaining // 60)}:{int(remaining % 60):02d}")
+    
+    user_data = load_data(USERS_DB_FILE)
+    user = user_data['users'][user_id]
+    
+    # Проверяем, есть ли у пользователя машина (для таксиста обязательно)
+    if not user.get('cars'):
+        return message.reply("❌ Для работы таксистом нужен автомобиль!")
+    
+    # Получаем активную машину
+    active_car_id = user.get('active_car')
+    cars = user.get('cars', {})
+    
+    if not active_car_id or active_car_id not in cars:
+        return message.reply("❌ Выберите активную машину в гараже!")
+    
+    car = cars[active_car_id]
+    
+    # Генерируем сценарий работы с пассажирами
+    passengers = [
+        ("делового человека в аэропорт", 1.3),
+        ("туриста по достопримечательностям", 1.2),
+        ("студента в университет", 0.9),
+        ("семью в торговый центр", 1.4),
+        ("медсестру на ночную смену", 1.1),
+        ("известную личность инкогнито", 1.8),
+        ("группу друзей на вечеринку", 1.5)
+    ]
+    
+    passenger, multiplier = random.choice(passengers)
+    
+    # Определяем награду
+    base_reward = random.randint(
+        JOBS_CONFIG['taxi']['money_min'],
+        JOBS_CONFIG['taxi']['money_max']
+    )
+    
+    # Умножаем на множитель пассажира
+    base_reward = int(base_reward * multiplier)
+    
+    # Бонус за уровень и скорость машины
+    level_bonus = int(base_reward * (user['level'] * 0.03))
+    speed_bonus = int(base_reward * (car['max_speed'] / 1000))  # +0.1% за каждые 10 км/ч
+    total_reward = base_reward + level_bonus + speed_bonus
+    
+    # Проверяем особое событие
+    if random.random() < JOBS_CONFIG['taxi']['special_event_chance']:
+        special_bonus = random.randint(200, 500)
+        total_reward += special_bonus
+        scenario = f"🎉 ОСОБЫЙ ЗАКАЗ! Вы перевезли {passenger} на длинную дистанцию! (+{special_bonus} руб.)"
+    else:
+        scenario = f"🚕 Вы перевезли {passenger}"
+    
+    # Проверяем аварию (зависит от состояния машины)
+    accident_chance = JOBS_CONFIG['taxi']['chance_accident']
+    if car['tire_health'] < 50:
+        accident_chance *= 1.5
+    if car['durability'] < 50:
+        accident_chance *= 1.5
+    
+    accident_happened = False
+    if random.random() < accident_chance:
+        accident_penalty = random.randint(100, 300)
+        total_reward = max(100, total_reward - accident_penalty)
+        accident_happened = True
+        
+        # Повреждение машины при аварии
+        damage_tires = random.randint(5, 15)
+        damage_body = random.randint(5, 15)
+        
+        car['tire_health'] = max(0, car['tire_health'] - damage_tires)
+        car['durability'] = max(0, car['durability'] - damage_body)
+        
+        scenario += f"\n💥 ДТП! Вы попали в небольшую аварию (-{accident_penalty} руб.)"
+        scenario += f"\n🛞 Шины повреждены: -{damage_tires}%"
+        scenario += f"\n🛠️ Кузов поврежден: -{damage_body}%"
+    
+    # Начисляем награду
+    user['money'] += total_reward
+    user['exp'] += JOBS_CONFIG['taxi']['exp_reward']
+    
+    # Проверяем повышение уровня
+    levels_gained = check_level_up(user)
+    
+    # Сохраняем данные
+    save_data(user_data, USERS_DB_FILE)
+    
+    # Устанавливаем cooldown
+    job_cooldowns[cooldown_key] = current_time + JOBS_CONFIG['taxi']['cooldown']
+    
+    # Обновляем статистику
+    update_job_stats(user_id, 'taxi', total_reward, accident_happened)
+    
+    # Формируем сообщение о результате
+    result_text = f"🚕 СМЕНА ТАКСИСТА ЗАВЕРШЕНА!\n\n"
+    result_text += f"{scenario}\n\n"
+    result_text += f"🚗 На машине: {car['name']}\n"
+    result_text += f"💵 Заработано: {total_reward} руб.\n"
+    result_text += f"📈 Получено опыта: {JOBS_CONFIG['taxi']['exp_reward']}\n"
+    result_text += f"💰 Новый баланс: {format_number(user['money'])} руб.\n"
+    
+    if speed_bonus > 0:
+        result_text += f"🚀 Бонус за скорость машины: +{speed_bonus} руб.\n"
+    
+    if levels_gained > 0:
+        result_text += f"\n🎉 ПОВЫШЕНИЕ УРОВНЯ! +{levels_gained} уровень(ей)!\n"
+        result_text += f"💰 Бонус за уровни: +{level_bonus} руб."
+    
+    result_text += f"\n\n⏳ Следующая смена через 4 минуты"
+    
+    keyboard = VkKeyboard(inline=True)
+    keyboard.add_button("🚕 Еще смена", VkKeyboardColor.PRIMARY, payload={'cmd': 'start_job', 'job_id': 'taxi'})
+    keyboard.add_button("🛠️ Автомеханик", VkKeyboardColor.SECONDARY, payload={'cmd': 'start_job', 'job_id': 'mechanic'})
+    keyboard.add_line()
+    keyboard.add_button("💼 Все работы", VkKeyboardColor.POSITIVE, payload={'cmd': 'jobs_menu'})
+    
+    message.reply(result_text, keyboard=keyboard.get_keyboard())
+
+def update_job_stats(user_id, job_id, earnings, accident=False):
+    """Обновить статистику работ"""
+    key = f"{user_id}_{job_id}"
+    
+    if key not in job_stats:
+        job_stats[key] = {
+            'total_shifts': 0,
+            'total_earnings': 0,
+            'accidents': 0,
+            'last_shift': time.time()
+        }
+    
+    stats = job_stats[key]
+    stats['total_shifts'] += 1
+    stats['total_earnings'] += earnings
+    stats['last_shift'] = time.time()
+    
+    if accident:
+        stats['accidents'] += 1
+
+def show_job_stats(message):
+    """Показать статистику работ"""
+    user_id = str(message.from_id)
+    
+    user_data = load_data(USERS_DB_FILE)
+    user = user_data['users'][user_id]
+    
+    text = "📊 СТАТИСТИКА РАБОТ\n\n"
+    
+    has_stats = False
+    
+    for job_id, job_info in JOBS_CONFIG.items():
+        if user['level'] >= job_info['required_level']:
+            key = f"{user_id}_{job_id}"
+            
+            if key in job_stats:
+                stats = job_stats[key]
+                has_stats = True
+                
+                avg_earnings = stats['total_earnings'] / stats['total_shifts'] if stats['total_shifts'] > 0 else 0
+                accident_rate = (stats['accidents'] / stats['total_shifts'] * 100) if stats['total_shifts'] > 0 else 0
+                
+                text += f"{job_info['name']}:\n"
+                text += f"  📈 Смен: {stats['total_shifts']}\n"
+                text += f"  💰 Всего заработано: {format_number(stats['total_earnings'])} руб.\n"
+                text += f"  📊 Средний заработок: {int(avg_earnings)} руб.\n"
+                text += f"  💥 Аварий: {stats['accidents']} ({accident_rate:.1f}%)\n"
+                text += f"  ⭐ Уровень доступа: {job_info['required_level']}+\n\n"
+            else:
+                text += f"{job_info['name']}:\n"
+                text += f"  ⭐ Уровень доступа: {job_info['required_level']}+\n"
+                text += f"  📊 Статистики пока нет\n\n"
+    
+    if not has_stats:
+        text += "📭 Вы еще не работали ни на одной работе!\n"
+        text += "Начните свою первую смену, чтобы появилась статистика.\n\n"
+    
+    text += "💡 Советы:\n"
+    text += "• Чем выше уровень - тем больше заработок\n"
+    text += "• Для таксиста важна скорость машины\n"
+    text += "• Следите за состоянием автомобиля\n"
+    
+    keyboard = VkKeyboard(inline=True)
+    keyboard.add_button("💼 Все работы", VkKeyboardColor.PRIMARY, payload={'cmd': 'jobs_menu'})
+    keyboard.add_button("🏠 Главное меню", VkKeyboardColor.POSITIVE, payload={'cmd': 'menu'})
+    
+    message.reply(text, keyboard=keyboard.get_keyboard())
+
+
+   
+    
+    
+    
+    
 
 def show_garage(message):
     db = load_data(USERS_DB_FILE)
