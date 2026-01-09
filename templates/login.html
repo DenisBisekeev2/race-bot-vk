@@ -4,38 +4,101 @@
 
 {% block content %}
 <div class="row justify-content-center">
-    <div class="col-md-6">
+    <div class="col-md-8">
         <div class="card">
             <div class="card-header">
                 <h4 class="mb-0"><i class="fas fa-sign-in-alt"></i> Вход через VK ID</h4>
             </div>
-            <div class="card-body">
-                <form method="POST">
-                    <div class="mb-3">
-                        <label for="user_id" class="form-label">Ваш VK ID:</label>
-                        <input type="number" class="form-control" id="user_id" name="user_id"
-                               placeholder="Введите ваш цифровой ID" required>
-                        <div class="form-text">
-                            Чтобы узнать ваш ID, напишите боту в ЛС команду "меню" и посмотрите в статистике
-                        </div>
-                    </div>
+            <div class="card-body text-center">
+                <!-- Контейнер для VK ID виджета -->
+                <div id="vk-id-container" class="mb-4">
+                    <div>
+                        <script nonce="{{ csp_nonce }}" src="https://unpkg.com/@vkid/sdk@<3.0.0/dist-sdk/umd/index.js"></script>
+                        <script nonce="{{ csp_nonce }}" type="text/javascript">
+                            if ('VKIDSDK' in window) {
+                                const VKID = window.VKIDSDK;
 
-                    <button type="submit" class="btn btn-primary w-100">
-                        <i class="fas fa-sign-in-alt"></i> Войти
-                    </button>
-                </form>
+                                VKID.Config.init({
+                                    app: 54417533, // Ваш App ID
+                                    redirectUrl: window.location.origin + '/callback',
+                                    responseMode: VKID.ConfigResponseMode.Callback,
+                                    source: VKID.ConfigSource.LOWCODE,
+                                    scope: '',
+                                });
+
+                                const oneTap = new VKID.OneTap();
+
+                                oneTap.render({
+                                    container: document.getElementById('vk-id-container'),
+                                    showAlternativeLogin: true,
+                                    styles: {
+                                        borderRadius: 50
+                                    }
+                                })
+                                .on(VKID.WidgetEvents.ERROR, vkidOnError)
+                                .on(VKID.OneTapInternalEvents.LOGIN_SUCCESS, function (payload) {
+                                    const code = payload.code;
+                                    const deviceId = payload.device_id;
+
+                                    VKID.Auth.exchangeCode(code, deviceId)
+                                        .then(vkidOnSuccess)
+                                        .catch(vkidOnError);
+                                });
+                            
+                                function vkidOnSuccess(data) {
+                                    // Получаем токен и отправляем на сервер
+                                    const token = data.access_token;
+                                    
+                                    // Отправляем токен на сервер для получения user_id
+                                    fetch('/vk_auth', {
+                                        method: 'POST',
+                                        headers: {
+                                            'Content-Type': 'application/json',
+                                        },
+                                        body: JSON.stringify({
+                                            token: token
+                                        })
+                                    })
+                                    .then(response => response.json())
+                                    .then(data => {
+                                        if (data.success) {
+                                            // Редирект на дашборд
+                                            window.location.href = '/dashboard';
+                                        } else {
+                                            alert('Ошибка авторизации: ' + data.error);
+                                        }
+                                    })
+                                    .catch(error => {
+                                        console.error('Ошибка:', error);
+                                        alert('Произошла ошибка при авторизации');
+                                    });
+                                }
+                            
+                                function vkidOnError(error) {
+                                    console.error('VK ID Error:', error);
+                                    document.getElementById('error-message').innerHTML = 
+                                        'Ошибка авторизации. Пожалуйста, попробуйте еще раз.';
+                                }
+                            }
+                        </script>
+                    </div>
+                </div>
+
+                <div id="error-message" class="alert alert-danger d-none"></div>
 
                 <hr>
 
                 <div class="alert alert-info">
-                    <h6><i class="fas fa-info-circle"></i> Как найти свой VK ID?</h6>
+                    <h6><i class="fas fa-info-circle"></i> Как войти?</h6>
                     <ol class="small">
-                        <li>Напишите боту в личные сообщения</li>
-                        <li>Отправьте команду "мой айди"</li>
-                        <li>Бот напишет вам ваш айди</li>
-                        <li>Используйте его для входа на сайт</li>
+                        <li>Нажмите на кнопку "Войти через VK ID" выше</li>
+                        <li>Разрешите доступ приложению</li>
+                        <li>Вы будете автоматически авторизованы</li>
+                        <li>Если у вас нет аккаунта в боте, он будет создан автоматически</li>
                     </ol>
                 </div>
+
+               
             </div>
         </div>
     </div>
