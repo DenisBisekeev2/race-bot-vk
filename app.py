@@ -1463,8 +1463,19 @@ def check_login(user_id):
 
 def handle_button_command(message, cmd, payload):
     """Обработка команд из обычных кнопок"""
+    
     if cmd == 'garage':
         show_garage(message)
+    elif cmd == 'jobs_menu':
+        show_jobs_menu(message)
+    elif cmd == 'start_job':
+        job_id = payload.get('job_id')
+        if job_id == 'mechanic':
+            start_job_mechanic(message)
+        elif job_id == 'taxi':
+            start_job_taxi(message)
+    elif cmd == 'job_stats':
+        show_job_stats(message)
     elif cmd == 'cars_shop':
         show_cars_shop(message)
     elif cmd == 'service':
