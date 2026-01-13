@@ -30,12 +30,12 @@ class FirebaseDB:
                     # Используем service account для продакшена
                     cred = credentials.Certificate(FIREBASE_SERVICE_ACCOUNT)
                     firebase_admin.initialize_app(cred, {
-                        'databaseURL': 'https://racebotvk-default-rtdb.firebaseio.com'
+                        'databaseURL': 'https://racebotvk-default-rtdb.europe-west1.firebasedatabase.app/'
                     })
                 else:
                     # Для разработки (тестовый режим)
                     firebase_admin.initialize_app(options={
-                        'databaseURL': 'https://racebotvk-default-rtdb.firebaseio.com'
+                        'databaseURL': 'https://racebotvk-default-rtdb.europe-west1.firebasedatabase.app/'
                     })
                 
                 logger.info("✅ Firebase инициализирован")
