@@ -3,7 +3,7 @@ import os
 import json
 
 # Токен бота VK
-BOT_TOKEN = os.getenv('BOT_TOKEN', 'vk1.a.MTzBXxQQyLu72tOMdVYarZLJ3yOOmHXJ2d-MIyWIw55LLJnAryrh1ueQTmh7lsmNXYYyLaU8c59brz9S2gBZ1YK_5HYujr809X2mn7N8OlHwOGiIVOzRJJQ1f_9tjsCquwGdHcKKBQ94Bx1TjKl3hQOX0iLel_1FNwgJ7ycrrK2efdNyrdXlqb31SpXpFk_ChGJDWnLnU6moOlIsVKQvtA')
+BOT_TOKEN = os.getenv('BOT_TOKEN', 'vk1.a.QL9trem3ZOHejiUTbdVRlc4M5gpRL5mU6OFMr6HPaIFfClqb4E3dwNRyYy83H8RuIbA1e0rNh9vMVY4LmuSuSdAgrnGOCevbFnXNSq9jiVT_H_T-2e_oGB3ySvaZ_jx9ZCXU23rZRAnydDjOR_JnkVCJQK62AMOlRWCJi-YWJRvYyHCXEUrVrj80HZhTV0zSfzl0u3z-3UkhUor_CFQCWA')
 admins_ids = [819016396, 761815201]
 
 # Вебхук настройки
