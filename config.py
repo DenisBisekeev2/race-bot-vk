@@ -25,13 +25,14 @@ LEVEL_REWARD = 500
 
 # Firebase конфигурация
 FIREBASE_CONFIG = {
-  "apiKey": "AIzaSyC7ct-SFUjPC9qJNhhouNiXNR_1mETftbw",
-  "authDomain": "racebotvk.firebaseapp.com",
-  "projectId": "racebotvk",
-  "storageBucket": "racebotvk.firebasestorage.app",
-  "messagingSenderId": "365558962198",
-  "appId": "1:365558962198:web:f552fdb300c29624953d37",
-  "measurementId": "G-CQ93R5VJ5N"
+    "apiKey": "AIzaSyC7ct-SFUjPC9qJNhhouNiXNR_1mETftbw",  # оставляем как есть
+    "authDomain": "racebotvk.firebaseapp.com",  # оставляем
+    "databaseURL": "https://racebotvk-default-rtdb.europe-west1.firebasedatabase.app",  # ЗАМЕНИ на свой реальный URL!
+    "projectId": "racebotvk",  # оставляем
+    "storageBucket": "racebotvk.firebasestorage.app",  # оставляем
+    "messagingSenderId": "365558962198",  # оставляем
+    "appId": "1:365558962198:web:f552fdb300c29624953d37",  # оставляем
+    "measurementId": "G-CQ93R5VJ5N"  # оставляем
 }
 
 # Данные для аутентификации Firebase
