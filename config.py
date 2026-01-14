@@ -25,5 +25,5 @@ LEVEL_REWARD = 500
 
 
 # Google Sheets настройки
-GOOGLE_SHEET_ID = "твой_ID_таблицы"  # Берешь из URL таблицы
+GOOGLE_SHEET_ID = "1uQ1Vezfo85ypSl8vOBdzSCZN7Ueqp11PmSog7TVC3F8"  # Берешь из URL таблицы
 GOOGLE_CREDENTIALS = "google_credentials.json"  # Файл с ключами
