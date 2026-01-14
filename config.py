@@ -38,4 +38,30 @@ FIREBASE_CONFIG = {
 # Данные для аутентификации Firebase
 FIREBASE_EMAIL = os.getenv('FIREBASE_EMAIL', 'bisekeevdenis6@gmail.com')
 FIREBASE_PASSWORD = os.getenv('FIREBASE_PASSWORD', '1234679SeGa')
-FIREBASE_SERVICE_ACCOUNT = json.loads(os.getenv('FIREBASE_SERVICE_ACCOUNT', '{}'))
+# Service Account для Admin SDK
+FIREBASE_SERVICE_ACCOUNT = None
+
+# Пробуем загрузить Service Account из переменных окружения
+service_account_json = os.getenv('FIREBASE_SERVICE_ACCOUNT')
+if service_account_json and service_account_json.strip():
+    try:
+        # Убираем лишние кавычки и пробелы
+        cleaned_json = service_account_json.strip()
+        if cleaned_json.startswith('"') and cleaned_json.endswith('"'):
+            cleaned_json = cleaned_json[1:-1]
+        # Заменяем экранированные кавычки
+        cleaned_json = cleaned_json.replace('\\"', '"')
+        cleaned_json = cleaned_json.replace('\\n', '\n')
+        
+        FIREBASE_SERVICE_ACCOUNT = json.loads(cleaned_json)
+        print("✅ FIREBASE_SERVICE_ACCOUNT успешно загружен")
+    except json.JSONDecodeError as e:
+        print(f"⚠️ Ошибка парсинга FIREBASE_SERVICE_ACCOUNT: {e}")
+        print(f"Полученная строка (первые 100 символов): {service_account_json[:100] if service_account_json else 'None'}")
+        FIREBASE_SERVICE_ACCOUNT = None
+    except Exception as e:
+        print(f"⚠️ Другая ошибка при загрузке FIREBASE_SERVICE_ACCOUNT: {e}")
+        FIREBASE_SERVICE_ACCOUNT = None
+else:
+    print("⚠️ FIREBASE_SERVICE_ACCOUNT не установлен в переменных окружения")
+    FIREBASE_SERVICE_ACCOUNT = None
