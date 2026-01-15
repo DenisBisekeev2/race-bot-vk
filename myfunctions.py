@@ -5,111 +5,38 @@ from vk_api.keyboard import VkKeyboard, VkKeyboardColor
 import time
 import random
 import threading
-import json
-import datetime
 from config import *
-from firebase_db import firebase_db
 
-# Глобальные переменные для гонок (хранятся в памяти)
 local_races = {}
 drag_races = {}
 global_races_waiting = {}
 global_races_active = {}
-pvp_waiting_players = {}
-pvp_active_races = {}
-database_login = {}
 
-# ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+def register_chat(message):
+    """Регистрация чата в базе данных"""
+    chats_data = load_data(CHATS_DB_FILE)
 
-def format_number(number):
-    """Красивый вывод чисел"""
-    return f"{number:,}".replace(",", " ")
+    if str(message.peer_id) not in chats_data.get('chats', {}):
+        chats_data.setdefault('chats', {})[str(message.peer_id)] = {
+            'title': message.chat_title or "Чат",
+            'premium': False,
+            'registered_date': datetime.datetime.now().isoformat(),
+            'total_races': 0
+        }
+        save_data(chats_data, CHATS_DB_FILE)
+        return True
+    return False
 
 def check_level_up(user):
     """Проверка и повышение уровня"""
     levels_gained = 0
-    exp = user.get('exp', 0)
-    level = user.get('level', 1)
-    money = user.get('money', 0)
-    
-    while exp >= 100:
-        level += 1
-        exp -= 100
-        money += LEVEL_REWARD
+    while user['exp'] >= 100:
+        user['level'] += 1
+        user['exp'] -= 100
+        user['money'] += LEVEL_REWARD
         levels_gained += 1
-    
-    if levels_gained > 0:
-        user['level'] = level
-        user['exp'] = exp
-        user['money'] = money
-        return levels_gained
-    return 0
 
-def get_user_by_id(user_id):
-    """Получить пользователя по ID"""
-    return firebase_db.get_user(str(user_id))
-
-def update_user_data(user_id, updates):
-    """Обновить данные пользователя"""
-    return firebase_db.update_user(str(user_id), updates)
-
-def get_car_colors(user_id):
-    """Получить цвета машин пользователя"""
-    user = get_user_by_id(user_id)
-    if user:
-        return user.get('car_colors', {})
-    return {}
-
-def save_car_color(user_id, car_id, color):
-    """Сохранить цвет машины"""
-    updates = {f'car_colors/{car_id}': color}
-    return update_user_data(str(user_id), updates)
-
-def get_chat_data(chat_id):
-    """Получить данные чата"""
-    return firebase_db.get_chat(str(chat_id))
-
-def save_chat_data(chat_id, chat_data):
-    """Сохранить данные чата"""
-    return firebase_db.save_chat(str(chat_id), chat_data)
-
-def update_chat_data(chat_id, updates):
-    """Обновить данные чата"""
-    return firebase_db.update_chat(str(chat_id), updates)
-
-def get_car_shop():
-    """Получить все машины в магазине"""
-    return firebase_db.get_car_shop()
-
-def get_admin_data():
-    """Получить админ данные"""
-    return firebase_db.get_admin_data()
-
-def is_user_banned(user_id):
-    """Проверить, забанен ли пользователь"""
-    return firebase_db.is_user_banned(str(user_id))
-
-def is_moderator(user_id):
-    """Проверить, является ли модератором"""
-    return firebase_db.is_moderator(str(user_id))
-
-def get_klans_data():
-    """Получить данные всех кланов"""
-    return firebase_db.get_all_klans()
-
-def save_klan_data(klan_id, klan_data):
-    """Сохранить данные клана"""
-    return firebase_db.save_klan(klan_id, klan_data)
-
-def update_klan_data(klan_id, updates):
-    """Обновить данные клана"""
-    return firebase_db.update_klan(klan_id, updates)
-
-def get_klan(klan_id):
-    """Получить данные клана"""
-    return firebase_db.get_klan(klan_id)
-
-# ==================== ОСНОВНЫЕ ФУНКЦИИ БОТА ====================
+    return levels_gained
 
 roles = {
     "moder": "👺 Модератор",
@@ -118,53 +45,33 @@ roles = {
     "owner": "👺 Владелец"
 }
 
-def register_chat(message):
-    """Регистрация чата в базе данных"""
-    chat_id = str(message.peer_id)
-    
-    # Проверяем существование чата
-    existing_chat = get_chat_data(chat_id)
-    if existing_chat:
-        return False
-    
-    # Создаем новый чат
-    chat_data = {
-        'title': message.chat_title or "Чат",
-        'premium': False,
-        'registered_date': datetime.datetime.now().isoformat(),
-        'total_races': 0
-    }
-    
-    return save_chat_data(chat_id, chat_data)
-
 def show_menu(message):
-    """Показать главное меню"""
     # Регистрируем чат если это групповой чат
     if message.is_group_chat:
         register_chat(message)
-    
+
+    db = load_data(USERS_DB_FILE)
     user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
-    
-    if not user:
+
+    if user_id not in db.get('users', {}):
         return reg_user(message)
-    
-    # Получаем информацию о модераторе
-    role = None
-    if is_moderator(user_id):
-        mod_info = firebase_db.get_moderator_info(user_id)
-        if mod_info:
-            status = mod_info.get('status', 'moder')
-            role = roles.get(status, '👺 Модератор')
-    
+
+    user = db['users'][user_id]
+    db_admin = load_data("admin.json")
+    moders = db_admin['moders']
+    role = ""
+    if str(user_id) in moders:
+        status = moders[str(user_id)]['status']
+        role = roles[status]
+        
+
     text = f"🏎️ ДОБРО ПОЖАЛОВАТЬ В ГОНОЧНЫЙ БОТ!\n\n"
     text += f"Здесь вы можете участвовать в захватывающих гонках, покупать машины и улучшать их!\n\n"
-    text += f"💎 Ваш уровень: {user.get('level', 1)}\n"
-    text += f"📊 Опыт до следующего уровня: {user.get('exp', 0)}/100\n"
-    text += f"💰 Ваш баланс: {format_number(user.get('money', 0))} руб.\n"
+    text += f"💎 Ваш уровень: {user['level']}\n"
+    text += f"📊 Опыт до следующего уровня: {user['exp']}/100\n"
+    text += f"💰 Ваш баланс: {format_number(user['money'])} руб.\n"
     text += f"🚗 Машин в гараже: {len(user.get('cars', {}))}\n"
-    if role:
-        text += f"{role}\n"
+    text += f"{role}\n"
     text += f"Выберите раздел:"
 
     keyboard = VkKeyboard(inline=True)
@@ -172,6 +79,7 @@ def show_menu(message):
     keyboard.add_button("🏪 Автосалон", VkKeyboardColor.POSITIVE, payload={'cmd': 'cars_shop'})
     keyboard.add_line()
     keyboard.add_button("🔧 Техцентр", VkKeyboardColor.SECONDARY, payload={'cmd': 'service'})
+    keyboard.add_button("💼 Работы", VkKeyboardColor.POSITIVE, payload={'cmd': 'jobs_menu'})
     keyboard.add_line()
 
     if message.is_private:
@@ -182,73 +90,483 @@ def show_menu(message):
 
     message.reply(text, keyboard=keyboard.get_keyboard())
 
-def reg_user(message):
-    """Регистрация нового пользователя"""
+
+def handle_db_command(message):
+    """Обработка команды /db - отправка файлов БД"""
+    # Проверяем, является ли пользователь админом
+    db = load_data("admin.json")
+    if str(message.from_id) not in db['moders']['users_ids']:
+        return 
+        
+    
+    # Список файлов для отправки
+    db_files = [
+        'users.json',
+        'admin.json', 
+        'payments.json',
+        'chats.json'
+    ]
+    
+    # Добавляем файлы, которые могут существовать
+    optional_files = ['global_races.json', 'klans.json']
+    
+    text = "📁 ФАЙЛЫ БАЗ ДАННЫХ\n\n"
+    sent_count = 0
+    
+    for file_name in db_files:
+        try:
+            if os.path.exists(file_name):
+                # Отправляем файл
+                upload = vk_api.VkUpload(message.vk)
+                doc = upload.document_message(
+                    file_name,
+                    peer_id=message.peer_id,
+                    title=f"DB: {file_name}"
+                )
+                
+                if doc:
+                    attachment = f"doc{doc['doc']['owner_id']}_{doc['doc']['id']}"
+                    message.reply(f"✅ {file_name}", attachment=attachment)
+                    sent_count += 1
+                    time.sleep(1)  # Задержка между отправками
+            else:
+                text += f"❌ {file_name} - файл не найден\n"
+        except Exception as e:
+            text += f"❌ {file_name} - ошибка: {str(e)[:50]}\n"
+    
+    # Пробуем отправить опциональные файлы
+    for file_name in optional_files:
+        try:
+            if os.path.exists(file_name):
+                upload = vk_api.VkUpload(message.vk)
+                doc = upload.document_message(
+                    file_name,
+                    peer_id=message.peer_id,
+                    title=f"DB: {file_name}"
+                )
+                
+                if doc:
+                    attachment = f"doc{doc['doc']['owner_id']}_{doc['doc']['id']}"
+                    message.reply(f"✅ {file_name}", attachment=attachment)
+                    sent_count += 1
+                    time.sleep(1)
+        except:
+            pass
+    
+    if sent_count > 0:
+        message.reply(f"📊 Отправлено файлов: {sent_count}")
+    else:
+        message.reply("❌ Не удалось отправить ни одного файла!")
+# =============================================================================
+# СИСТЕМА РАБОТ
+# =============================================================================
+
+# Конфигурация работ
+JOBS_CONFIG = {
+    "mechanic": {
+        "name": "🚗 Автомеханик",
+        "description": "Ремонт машин в автосервисе",
+        "required_level": 1,
+        "cooldown": 300,  # 5 минут
+        "money_min": 150,
+        "money_max": 400,
+        "exp_reward": 10,
+        "chance_accident": 0.1,  # 10% шанс аварии
+        "special_event_chance": 0.05  # 5% шанс особого события
+    },
+    "taxi": {
+        "name": "🚕 Таксист",
+        "description": "Перевозка пассажиров по городу",
+        "required_level": 2,
+        "cooldown": 240,  # 4 минуты
+        "money_min": 200,
+        "money_max": 500,
+        "exp_reward": 15,
+        "chance_accident": 0.15,  # 15% шанс аварии
+        "special_event_chance": 0.08  # 8% шанс особого события
+    }
+}
+
+# Хранилище cooldown'ов работ
+job_cooldowns = {}
+# Хранилище статистики работ
+job_stats = {}
+
+def show_jobs_menu(message):
+    """Показать меню работ"""
+    db = load_data(USERS_DB_FILE)
     user_id = str(message.from_id)
     
-    # Проверяем существование
-    existing_user = get_user_by_id(user_id)
-    if existing_user:
-        message.reply("❌ Вы уже зарегистрированы в боте!")
-        show_menu(message)
-        return
+    if user_id not in db.get('users', {}):
+        return message.reply("❌ У вас нет аккаунта в боте! Напишите 'Начать' для регистрации.")
     
-    if message.is_group_chat:
-        return message.reply("❌ Регистрация в боте возможна только в лс бота.")
+    user = db['users'][user_id]
     
-    if not message.isMember(user_id=user_id):
-        return message.reply("🙃 Регистрация в боте невозможна, если вы не подписаны на него!")
-
-    # Создаем нового пользователя
-    new_user = {
-        'username': message.full_name,
-        'money': 5000,
-        'exp': 0,
-        'level': 1,
-        'cars': {},
-        'active_car': None,
-        'referral_code': f"ref_{user_id}",
-        'referred_by': None,
-        'pistons': 0,
-        'car_colors': {}
-    }
+    text = "💼 СИСТЕМА РАБОТ\n\n"
+    text += f"👤 Ваш уровень: {user['level']}\n"
+    text += f"💰 Ваш баланс: {format_number(user['money'])} руб.\n\n"
+    text += "📋 Доступные работы:\n\n"
     
-    # Сохраняем в Firebase
-    success = firebase_db.save_user(user_id, new_user)
+    # Проверяем доступные работы
+    available_jobs = []
     
-    if success:
-        keyboard = VkKeyboard(inline=True)
-        keyboard.add_openlink_button("📚 Правила бота", "https://vk.com/@gonka_bot-rules")
+    for job_id, job_info in JOBS_CONFIG.items():
+        if user['level'] >= job_info['required_level']:
+            cooldown_key = f"{user_id}_{job_id}"
+            remaining_time = job_cooldowns.get(cooldown_key, 0) - time.time()
+            
+            if remaining_time > 0:
+                time_left = f"⏳ {int(remaining_time // 60)}:{int(remaining_time % 60):02d}"
+                available_jobs.append(f"❌ {job_info['name']} ({time_left})")
+            else:
+                available_jobs.append(f"✅ {job_info['name']}")
+        else:
+            available_jobs.append(f"🔒 {job_info['name']} (нужен уровень {job_info['required_level']}+)")
+    
+    text += "\n".join(available_jobs)
+    text += "\n\n📊 Выберите работу для начала смены:"
+    
+    keyboard = VkKeyboard(inline=True)
+    
+    # Добавляем кнопки для доступных работ
+    row_count = 0
+    for job_id, job_info in JOBS_CONFIG.items():
+        if user['level'] >= job_info['required_level']:
+            cooldown_key = f"{user_id}_{job_id}"
+            remaining_time = job_cooldowns.get(cooldown_key, 0) - time.time()
+            
+            if remaining_time <= 0:
+                if row_count == 2:
+                    keyboard.add_line()
+                    row_count = 0
+                keyboard.add_button(
+                    job_info['name'],
+                    VkKeyboardColor.SECONDARY,
+                    payload={'cmd': 'start_job', 'job_id': job_id}
+                )
+                row_count += 1
+    
+    if row_count > 0:
         keyboard.add_line()
-        keyboard.add_vkapps_button(
-            app_id=6441755,
-            owner_id=-233724428,
-            label="➕ Добавить в чат",
-            hash=""
-        )
+    
+    keyboard.add_button("📊 Статистика работ", VkKeyboardColor.PRIMARY, payload={'cmd': 'job_stats'})
+    keyboard.add_button("🏠 Главное меню", VkKeyboardColor.POSITIVE, payload={'cmd': 'menu'})
+    
+    message.reply(text, keyboard=keyboard.get_keyboard())
 
-        message.reply(f"😁 Отлично, {message.get_mention(message.from_id)}, регистрация прошла успешно!\n\n🎮 Теперь вы можете участвовать в гонках и покупать машины!\n\n⚠️ Чтобы начать участвовать в гонках, купите первую машину, написав: автосалон", keyboard=keyboard.get_keyboard())
+def start_job_mechanic(message):
+    """Начать работу автомехаником"""
+    user_id = str(message.from_id)
+    cooldown_key = f"{user_id}_mechanic"
+    
+    # Проверяем cooldown
+    current_time = time.time()
+    if cooldown_key in job_cooldowns and job_cooldowns[cooldown_key] > current_time:
+        remaining = job_cooldowns[cooldown_key] - current_time
+        return message.reply(f"⏳ Вы еще устали после предыдущей смены! Отдохните еще {int(remaining // 60)}:{int(remaining % 60):02d}")
+    
+    user_data = load_data(USERS_DB_FILE)
+    user = user_data['users'][user_id]
+    
+    # Проверяем, есть ли у пользователя машина (для механика важно)
+    if not user.get('cars'):
+        return message.reply("❌ Для работы автомехаником нужен хотя бы один автомобиль для практики!")
+    
+    # Генерируем сценарий работы
+    scenarios = [
+        "🔧 Вы заменили масло в двигателе клиента",
+        "🛞 Вы отбалансировали колеса на стенде",
+        "🔩 Вы заменили тормозные колодки",
+        "⚙️ Вы настроили развал-схождение",
+        "💨 Вы почистили топливную систему",
+        "🔋 Вы заменили аккумулятор",
+        "🚗 Вы провели полную диагностику автомобиля"
+    ]
+    
+    scenario = random.choice(scenarios)
+    
+    # Определяем награду
+    base_reward = random.randint(
+        JOBS_CONFIG['mechanic']['money_min'],
+        JOBS_CONFIG['mechanic']['money_max']
+    )
+    
+    # Бонус за уровень
+    level_bonus = int(base_reward * (user['level'] * 0.05))
+    total_reward = base_reward + level_bonus
+    
+    # Проверяем особое событие
+    if random.random() < JOBS_CONFIG['mechanic']['special_event_chance']:
+        special_bonus = random.randint(100, 300)
+        total_reward += special_bonus
+        scenario += f"\n🎉 ОСОБЫЙ ЗАКАЗ! Вы отремонтировали раритетный автомобиль! (+{special_bonus} руб.)"
+    
+    # Проверяем аварию
+    accident_happened = False
+    if random.random() < JOBS_CONFIG['mechanic']['chance_accident']:
+        accident_penalty = random.randint(50, 150)
+        total_reward = max(50, total_reward - accident_penalty)
+        accident_happened = True
+        scenario += f"\n💥 НЕСЧАСТНЫЙ СЛУЧАЙ! Вы случайно повредили деталь клиента (-{accident_penalty} руб.)"
+    
+    # Начисляем награду
+    user['money'] += total_reward
+    user['exp'] += JOBS_CONFIG['mechanic']['exp_reward']
+    
+    # Проверяем повышение уровня
+    levels_gained = check_level_up(user)
+    
+    # Сохраняем данные
+    save_data(user_data, USERS_DB_FILE)
+    
+    # Устанавливаем cooldown
+    job_cooldowns[cooldown_key] = current_time + JOBS_CONFIG['mechanic']['cooldown']
+    
+    # Обновляем статистику
+    update_job_stats(user_id, 'mechanic', total_reward, accident_happened)
+    
+    # Формируем сообщение о результате
+    result_text = f"🛠️ СМЕНА АВТОМЕХАНИКА ЗАВЕРШЕНА!\n\n"
+    result_text += f"{scenario}\n\n"
+    result_text += f"💵 Заработано: {total_reward} руб.\n"
+    result_text += f"📈 Получено опыта: {JOBS_CONFIG['mechanic']['exp_reward']}\n"
+    result_text += f"💰 Новый баланс: {format_number(user['money'])} руб.\n"
+    
+    if levels_gained > 0:
+        result_text += f"\n🎉 ПОВЫШЕНИЕ УРОВНЯ! +{levels_gained} уровень(ей)!\n"
+        result_text += f"💰 Бонус за уровни: +{level_bonus} руб."
+    
+    result_text += f"\n\n⏳ Следующая смена через 5 минут"
+    
+    keyboard = VkKeyboard(inline=True)
+    keyboard.add_button("🛠️ Еще смена", VkKeyboardColor.PRIMARY, payload={'cmd': 'start_job', 'job_id': 'mechanic'})
+    keyboard.add_button("🚕 Таксист", VkKeyboardColor.SECONDARY, payload={'cmd': 'start_job', 'job_id': 'taxi'})
+    keyboard.add_line()
+    keyboard.add_button("💼 Все работы", VkKeyboardColor.POSITIVE, payload={'cmd': 'jobs_menu'})
+    
+    message.reply(result_text, keyboard=keyboard.get_keyboard())
+
+def start_job_taxi(message):
+    """Начать работу таксистом"""
+    user_id = str(message.from_id)
+    cooldown_key = f"{user_id}_taxi"
+    
+    # Проверяем cooldown
+    current_time = time.time()
+    if cooldown_key in job_cooldowns and job_cooldowns[cooldown_key] > current_time:
+        remaining = job_cooldowns[cooldown_key] - current_time
+        return message.reply(f"⏳ Вы еще устали после предыдущей смены! Отдохните еще {int(remaining // 60)}:{int(remaining % 60):02d}")
+    
+    user_data = load_data(USERS_DB_FILE)
+    user = user_data['users'][user_id]
+    
+    # Проверяем, есть ли у пользователя машина (для таксиста обязательно)
+    if not user.get('cars'):
+        return message.reply("❌ Для работы таксистом нужен автомобиль!")
+    
+    # Получаем активную машину
+    active_car_id = user.get('active_car')
+    cars = user.get('cars', {})
+    
+    if not active_car_id or active_car_id not in cars:
+        return message.reply("❌ Выберите активную машину в гараже!")
+    
+    car = cars[active_car_id]
+    
+    # Генерируем сценарий работы с пассажирами
+    passengers = [
+        ("делового человека в аэропорт", 1.3),
+        ("туриста по достопримечательностям", 1.2),
+        ("студента в университет", 0.9),
+        ("семью в торговый центр", 1.4),
+        ("медсестру на ночную смену", 1.1),
+        ("известную личность инкогнито", 1.8),
+        ("группу друзей на вечеринку", 1.5)
+    ]
+    
+    passenger, multiplier = random.choice(passengers)
+    
+    # Определяем награду
+    base_reward = random.randint(
+        JOBS_CONFIG['taxi']['money_min'],
+        JOBS_CONFIG['taxi']['money_max']
+    )
+    
+    # Умножаем на множитель пассажира
+    base_reward = int(base_reward * multiplier)
+    
+    # Бонус за уровень и скорость машины
+    level_bonus = int(base_reward * (user['level'] * 0.03))
+    speed_bonus = int(base_reward * (car['max_speed'] / 1000))  # +0.1% за каждые 10 км/ч
+    total_reward = base_reward + level_bonus + speed_bonus
+    
+    # Проверяем особое событие
+    if random.random() < JOBS_CONFIG['taxi']['special_event_chance']:
+        special_bonus = random.randint(200, 500)
+        total_reward += special_bonus
+        scenario = f"🎉 ОСОБЫЙ ЗАКАЗ! Вы перевезли {passenger} на длинную дистанцию! (+{special_bonus} руб.)"
     else:
-        message.reply("❌ Ошибка при регистрации. Попробуйте позже.")
+        scenario = f"🚕 Вы перевезли {passenger}"
+    
+    # Проверяем аварию (зависит от состояния машины)
+    accident_chance = JOBS_CONFIG['taxi']['chance_accident']
+    if car['tire_health'] < 50:
+        accident_chance *= 1.5
+    if car['durability'] < 50:
+        accident_chance *= 1.5
+    
+    accident_happened = False
+    if random.random() < accident_chance:
+        accident_penalty = random.randint(100, 300)
+        total_reward = max(100, total_reward - accident_penalty)
+        accident_happened = True
+        
+        # Повреждение машины при аварии
+        damage_tires = random.randint(5, 15)
+        damage_body = random.randint(5, 15)
+        
+        car['tire_health'] = max(0, car['tire_health'] - damage_tires)
+        car['durability'] = max(0, car['durability'] - damage_body)
+        
+        scenario += f"\n💥 ДТП! Вы попали в небольшую аварию (-{accident_penalty} руб.)"
+        scenario += f"\n🛞 Шины повреждены: -{damage_tires}%"
+        scenario += f"\n🛠️ Кузов поврежден: -{damage_body}%"
+    
+    # Начисляем награду
+    user['money'] += total_reward
+    user['exp'] += JOBS_CONFIG['taxi']['exp_reward']
+    
+    # Проверяем повышение уровня
+    levels_gained = check_level_up(user)
+    
+    # Сохраняем данные
+    save_data(user_data, USERS_DB_FILE)
+    
+    # Устанавливаем cooldown
+    job_cooldowns[cooldown_key] = current_time + JOBS_CONFIG['taxi']['cooldown']
+    
+    # Обновляем статистику
+    update_job_stats(user_id, 'taxi', total_reward, accident_happened)
+    
+    # Формируем сообщение о результате
+    result_text = f"🚕 СМЕНА ТАКСИСТА ЗАВЕРШЕНА!\n\n"
+    result_text += f"{scenario}\n\n"
+    result_text += f"🚗 На машине: {car['name']}\n"
+    result_text += f"💵 Заработано: {total_reward} руб.\n"
+    result_text += f"📈 Получено опыта: {JOBS_CONFIG['taxi']['exp_reward']}\n"
+    result_text += f"💰 Новый баланс: {format_number(user['money'])} руб.\n"
+    
+    if speed_bonus > 0:
+        result_text += f"🚀 Бонус за скорость машины: +{speed_bonus} руб.\n"
+    
+    if levels_gained > 0:
+        result_text += f"\n🎉 ПОВЫШЕНИЕ УРОВНЯ! +{levels_gained} уровень(ей)!\n"
+        result_text += f"💰 Бонус за уровни: +{level_bonus} руб."
+    
+    result_text += f"\n\n⏳ Следующая смена через 4 минуты"
+    
+    keyboard = VkKeyboard(inline=True)
+    keyboard.add_button("🚕 Еще смена", VkKeyboardColor.PRIMARY, payload={'cmd': 'start_job', 'job_id': 'taxi'})
+    keyboard.add_button("🛠️ Автомеханик", VkKeyboardColor.SECONDARY, payload={'cmd': 'start_job', 'job_id': 'mechanic'})
+    keyboard.add_line()
+    keyboard.add_button("💼 Все работы", VkKeyboardColor.POSITIVE, payload={'cmd': 'jobs_menu'})
+    
+    message.reply(result_text, keyboard=keyboard.get_keyboard())
+
+def update_job_stats(user_id, job_id, earnings, accident=False):
+    """Обновить статистику работ"""
+    key = f"{user_id}_{job_id}"
+    
+    if key not in job_stats:
+        job_stats[key] = {
+            'total_shifts': 0,
+            'total_earnings': 0,
+            'accidents': 0,
+            'last_shift': time.time()
+        }
+    
+    stats = job_stats[key]
+    stats['total_shifts'] += 1
+    stats['total_earnings'] += earnings
+    stats['last_shift'] = time.time()
+    
+    if accident:
+        stats['accidents'] += 1
+
+def show_job_stats(message):
+    """Показать статистику работ"""
+    user_id = str(message.from_id)
+    
+    user_data = load_data(USERS_DB_FILE)
+    user = user_data['users'][user_id]
+    
+    text = "📊 СТАТИСТИКА РАБОТ\n\n"
+    
+    has_stats = False
+    
+    for job_id, job_info in JOBS_CONFIG.items():
+        if user['level'] >= job_info['required_level']:
+            key = f"{user_id}_{job_id}"
+            
+            if key in job_stats:
+                stats = job_stats[key]
+                has_stats = True
+                
+                avg_earnings = stats['total_earnings'] / stats['total_shifts'] if stats['total_shifts'] > 0 else 0
+                accident_rate = (stats['accidents'] / stats['total_shifts'] * 100) if stats['total_shifts'] > 0 else 0
+                
+                text += f"{job_info['name']}:\n"
+                text += f"  📈 Смен: {stats['total_shifts']}\n"
+                text += f"  💰 Всего заработано: {format_number(stats['total_earnings'])} руб.\n"
+                text += f"  📊 Средний заработок: {int(avg_earnings)} руб.\n"
+                text += f"  💥 Аварий: {stats['accidents']} ({accident_rate:.1f}%)\n"
+                text += f"  ⭐ Уровень доступа: {job_info['required_level']}+\n\n"
+            else:
+                text += f"{job_info['name']}:\n"
+                text += f"  ⭐ Уровень доступа: {job_info['required_level']}+\n"
+                text += f"  📊 Статистики пока нет\n\n"
+    
+    if not has_stats:
+        text += "📭 Вы еще не работали ни на одной работе!\n"
+        text += "Начните свою первую смену, чтобы появилась статистика.\n\n"
+    
+    text += "💡 Советы:\n"
+    text += "• Чем выше уровень - тем больше заработок\n"
+    text += "• Для таксиста важна скорость машины\n"
+    text += "• Следите за состоянием автомобиля\n"
+    
+    keyboard = VkKeyboard(inline=True)
+    keyboard.add_button("💼 Все работы", VkKeyboardColor.PRIMARY, payload={'cmd': 'jobs_menu'})
+    keyboard.add_button("🏠 Главное меню", VkKeyboardColor.POSITIVE, payload={'cmd': 'menu'})
+    
+    message.reply(text, keyboard=keyboard.get_keyboard())
+
+
+   
+    
+    
+    
+    
 
 def show_garage(message):
-    """Показать гараж пользователя"""
+    db = load_data(USERS_DB_FILE)
     user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
-    
-    if not user:
+
+    if user_id not in db.get('users', {}):
         return message.reply("❌ У вас нет аккаунта в боте! Напишите 'Начать' для регистрации.")
 
+    user = db['users'][user_id]
     cars = user.get('cars', {})
+
     if not cars:
         return message.reply("❌ У вас нет машин! Посетите автосалон.")
 
     text = "🚗 ВАШ ГАРАЖ\n\n"
     for car_id, car_data in cars.items():
         active_indicator = " ✅" if user.get('active_car') == car_id else ""
-        text += f"🏁 {car_data.get('name', 'Без названия')}{active_indicator}\n"
-        text += f"   💪 {format_number(car_data.get('hp', 0))} л.с. | 🚀 {format_number(car_data.get('max_speed', 0))} км/ч\n"
-        text += f"   🛞 Шины: {car_data.get('tire_health', 100)}% | 🛠️ Состояние: {car_data.get('durability', 100)}%\n\n"
+        text += f"🏁 {car_data['name']}{active_indicator}\n"
+        text += f"   💪 {format_number(car_data['hp'])} л.с. | 🚀 {format_number(car_data['max_speed'])} км/ч\n"
+        text += f"   🛞 Шины: {car_data['tire_health']}% | 🛠️ Состояние: {car_data['durability']}%\n\n"
 
     keyboard = VkKeyboard(inline=True)
     keyboard.add_button("🏪 Автосалон", VkKeyboardColor.POSITIVE, payload={'cmd': 'cars_shop'})
@@ -259,31 +577,31 @@ def show_garage(message):
     message.reply(text, keyboard=keyboard.get_keyboard(), attachment="photo-233724428_456239026")
 
 def show_cars_shop(message):
-    """Показать автосалон"""
+    cars_data = load_data(CARS_DB_FILE)
+    user_data = load_data(USERS_DB_FILE)
     user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
-    
-    if not user:
+
+    if user_id not in user_data.get('users', {}):
         return message.reply("❌ Сначала зарегистрируйтесь!")
 
-    cars_data = get_car_shop()
-    
-    text = "🏪 АВТОСАЛОН\n\n"
-    text += f"💰 Ваш баланс: {format_number(user.get('money', 0))} руб.\n\n"
+    user = user_data['users'][user_id]
 
-    for car_id, car in cars_data.items():
-        text += f"🏁 {car.get('name', 'Без названия')}\n"
-        text += f"   💪 {format_number(car.get('hp', 0))} л.с. | 🚀 {format_number(car.get('max_speed', 0))} км/ч\n"
-        text += f"   💰 Цена: {format_number(car.get('price', 0))} руб.\n\n"
+    text = "🏪 АВТОСАЛОН\n\n"
+    text += f"💰 Ваш баланс: {format_number(user['money'])} руб.\n\n"
+
+    cars_shop = cars_data.get('cars_shop', {})
+    for car_id, car in cars_shop.items():
+        text += f"🏁 {car['name']}\n"
+        text += f"   💪 {format_number(car['hp'])} л.с. | 🚀 {format_number(car['max_speed'])} км/ч\n"
+        text += f"   💰 Цена: {format_number(car['price'])} руб.\n\n"
 
     keyboard = VkKeyboard(inline=True)
     row_count = 0
-    for car_id in cars_data.keys():
+    for car_id in cars_shop.keys():
         if row_count == 2:
             keyboard.add_line()
             row_count = 0
-        car_name = cars_data[car_id].get('name', f"Машина {car_id}")
-        keyboard.add_button(f"Купить {car_name}",
+        keyboard.add_button(f"Купить {cars_shop[car_id]['name']}",
                            VkKeyboardColor.SECONDARY,
                            payload={'cmd': 'buy_car', 'car_id': car_id})
         row_count += 1
@@ -295,89 +613,73 @@ def show_cars_shop(message):
     message.reply(text, keyboard=keyboard.get_keyboard(), attachment="photo-233724428_456239025")
 
 def buy_car(message, car_id):
-    """Купить машину"""
+    cars_data = load_data(CARS_DB_FILE)
+    user_data = load_data(USERS_DB_FILE)
+
     user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
-    
-    if not user:
+    if user_id not in user_data.get('users', {}):
         return message.reply("❌ Сначала зарегистрируйтесь!")
 
-    cars_data = get_car_shop()
-    car = cars_data.get(car_id)
-    
+    user = user_data['users'][user_id]
+    car = cars_data.get('cars_shop', {}).get(car_id)
+
     if not car:
         return message.reply("❌ Машина не найдена!")
 
-    user_money = user.get('money', 0)
-    car_price = car.get('price', 0)
-    
-    if user_money < car_price:
-        return message.reply(f"❌ Недостаточно денег! Нужно: {format_number(car_price)} руб.")
+    if user['money'] < car['price']:
+        return message.reply(f"❌ Недостаточно денег! Нужно: {format_number(car['price'])} руб.")
 
     # Добавляем машину в гараж
-    cars = user.get('cars', {})
-    new_car_id = str(len(cars) + 1)
-    
-    new_car = {
-        'name': car.get('name', 'Без названия'),
-        'hp': car.get('hp', 0),
-        'max_speed': car.get('max_speed', 0),
-        'tire_health': car.get('tire_health', 100),
-        'durability': car.get('durability', 100),
+    if 'cars' not in user:
+        user['cars'] = {}
+
+    new_car_id = str(len(user['cars']) + 1)
+    user['cars'][new_car_id] = {
+        'name': car['name'],
+        'hp': car['hp'],
+        'max_speed': car['max_speed'],
+        'tire_health': car['tire_health'],
+        'durability': car['durability'],
         'bought_date': datetime.datetime.now().isoformat()
     }
-    
-    cars[new_car_id] = new_car
-    
-    # Подготавливаем обновления
-    updates = {
-        'money': user_money - car_price,
-        'cars': cars
-    }
-    
-    # Если это первая машина, делаем ее активной
-    if len(cars) == 1:
-        updates['active_car'] = new_car_id
-    
-    success = update_user_data(user_id, updates)
-    
-    if success:
-        message.reply(f"✅ Вы купили {car.get('name', 'Машину')} за {format_number(car_price)} руб!")
-    else:
-        message.reply("❌ Ошибка при покупке машины.")
+
+    user['money'] -= car['price']
+    save_data(user_data, USERS_DB_FILE)
+
+    message.reply(f"✅ Вы купили {car['name']} за {format_number(car['price'])} руб!")
 
 def show_service(message):
-    """Показать техцентр"""
+    user_data = load_data(USERS_DB_FILE)
     user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
-    
-    if not user:
+
+    if user_id not in user_data.get('users', {}):
         return message.reply("❌ Сначала зарегистрируйтесь!")
 
-    cars = user.get('cars', {})
-    if not cars:
+    user = user_data['users'][user_id]
+
+    if not user.get('cars'):
         return message.reply("❌ У вас нет машин!")
 
     # Находим активную машину
     active_car_id = user.get('active_car')
+    cars = user.get('cars', {})
+
     if not active_car_id or active_car_id not in cars:
         active_car_id = list(cars.keys())[0]
-        update_user_data(user_id, {'active_car': active_car_id})
-        user = get_user_by_id(user_id)  # Обновляем данные
+        user['active_car'] = active_car_id
+        save_data(user_data, USERS_DB_FILE)
 
-    car = cars.get(active_car_id, {})
-    if not car:
-        return message.reply("❌ Машина не найдена!")
+    car = cars[active_car_id]
 
-    text = f"🔧 ТЕХЦЕНТР - {car.get('name', 'Без названия')}\n\n"
-    text += f"🛞 Шины: {car.get('tire_health', 100)}%\n"
-    text += f"🛠️ Состояние: {car.get('durability', 100)}%\n\n"
+    text = f"🔧 ТЕХЦЕНТР - {car['name']}\n\n"
+    text += f"🛞 Шины: {car['tire_health']}%\n"
+    text += f"🛠️ Состояние: {car['durability']}%\n\n"
     text += "Услуги:\n"
     text += "🛞 Замена шин - 500 руб. (до 100%)\n"
     text += "🛠️ Ремонт кузова - 800 руб. (до 100%)\n"
     text += "💪 Улучшение двигателя - 2000 руб. (+10% л.с.)\n"
     text += "🚀 Улучшение скорости - 3000 руб. (+5% скорости)\n\n"
-    text += f"💰 Ваш баланс: {format_number(user.get('money', 0))} руб."
+    text += f"💰 Ваш баланс: {format_number(user['money'])} руб."
 
     keyboard = VkKeyboard(inline=True)
     keyboard.add_button("🛞 Заменить шины", VkKeyboardColor.SECONDARY, payload={'cmd': 'repair_tires'})
@@ -391,164 +693,135 @@ def show_service(message):
     message.reply(text, keyboard=keyboard.get_keyboard(), attachment="photo-233724428_456239024")
 
 def repair_tires(message):
-    """Замена шин"""
+    user_data = load_data(USERS_DB_FILE)
     user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
-    
-    if not user:
+
+    if user_id not in user_data.get('users', {}):
         return message.reply("❌ Сначала зарегистрируйтесь!")
 
-    cars = user.get('cars', {})
-    if not cars:
+    user = user_data['users'][user_id]
+
+    if not user.get('cars'):
         return message.reply("❌ У вас нет машин!")
 
     active_car_id = user.get('active_car')
-    if not active_car_id or active_car_id not in cars:
+    if not active_car_id or active_car_id not in user['cars']:
         return message.reply("❌ Сначала выберите активную машину!")
 
-    car = cars[active_car_id]
-    
-    if car.get('tire_health', 0) >= 100:
+    car = user['cars'][active_car_id]
+
+    if car['tire_health'] >= 100:
         return message.reply("❌ Шины и так в идеальном состоянии!")
 
     cost = 500
-    if user.get('money', 0) < cost:
+    if user['money'] < cost:
         return message.reply(f"❌ Недостаточно денег! Нужно: {cost} руб.")
 
-    # Обновляем шины
-    updates = {
-        'money': user.get('money', 0) - cost,
-        f'cars/{active_car_id}/tire_health': 100
-    }
-    
-    success = update_user_data(user_id, updates)
-    
-    if success:
-        message.reply(f"✅ Шины заменены! Состояние: 100% (-{cost} руб.)")
-    else:
-        message.reply("❌ Ошибка при замене шин.")
+    user['money'] -= cost
+    car['tire_health'] = 100
+    save_data(user_data, USERS_DB_FILE)
+
+    message.reply(f"✅ Шины заменены! Состояние: 100% (-{cost} руб.)")
 
 def repair_body(message):
-    """Ремонт кузова"""
+    user_data = load_data(USERS_DB_FILE)
     user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
-    
-    if not user:
+
+    if user_id not in user_data.get('users', {}):
         return message.reply("❌ Сначала зарегистрируйтесь!")
 
-    cars = user.get('cars', {})
-    if not cars:
+    user = user_data['users'][user_id]
+
+    if not user.get('cars'):
         return message.reply("❌ У вас нет машин!")
 
     active_car_id = user.get('active_car')
-    if not active_car_id or active_car_id not in cars:
+    if not active_car_id or active_car_id not in user['cars']:
         return message.reply("❌ Сначала выберите активную машину!")
 
-    car = cars[active_car_id]
-    
-    if car.get('durability', 0) >= 100:
+    car = user['cars'][active_car_id]
+
+    if car['durability'] >= 100:
         return message.reply("❌ Кузов и так в идеальном состоянии!")
 
     cost = 800
-    if user.get('money', 0) < cost:
+    if user['money'] < cost:
         return message.reply(f"❌ Недостаточно денег! Нужно: {cost} руб.")
 
-    # Обновляем кузов
-    updates = {
-        'money': user.get('money', 0) - cost,
-        f'cars/{active_car_id}/durability': 100
-    }
-    
-    success = update_user_data(user_id, updates)
-    
-    if success:
-        message.reply(f"✅ Кузов отремонтирован! Состояние: 100% (-{cost} руб.)")
-    else:
-        message.reply("❌ Ошибка при ремонте кузова.")
+    user['money'] -= cost
+    car['durability'] = 100
+    save_data(user_data, USERS_DB_FILE)
+
+    message.reply(f"✅ Кузов отремонтирован! Состояние: 100% (-{cost} руб.)")
 
 def upgrade_engine(message):
-    """Улучшение двигателя"""
+    user_data = load_data(USERS_DB_FILE)
     user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
-    
-    if not user:
+
+    if user_id not in user_data.get('users', {}):
         return message.reply("❌ Сначала зарегистрируйтесь!")
 
-    cars = user.get('cars', {})
-    if not cars:
+    user = user_data['users'][user_id]
+
+    if not user.get('cars'):
         return message.reply("❌ У вас нет машин!")
 
     active_car_id = user.get('active_car')
-    if not active_car_id or active_car_id not in cars:
+    if not active_car_id or active_car_id not in user['cars']:
         return message.reply("❌ Сначала выберите активную машину!")
 
-    car = cars[active_car_id]
-    
+    car = user['cars'][active_car_id]
+
     cost = 2000
-    if user.get('money', 0) < cost:
+    if user['money'] < cost:
         return message.reply(f"❌ Недостаточно денег! Нужно: {cost} руб.")
 
-    hp_increase = int(car.get('hp', 0) * 0.1)
-    new_hp = car.get('hp', 0) + hp_increase
-    
-    updates = {
-        'money': user.get('money', 0) - cost,
-        f'cars/{active_car_id}/hp': new_hp
-    }
-    
-    success = update_user_data(user_id, updates)
-    
-    if success:
-        message.reply(f"✅ Двигатель улучшен! +{format_number(hp_increase)} л.с. (-{cost} руб.)")
-    else:
-        message.reply("❌ Ошибка при улучшении двигателя.")
+    hp_increase = int(car['hp'] * 0.1)
+    user['money'] -= cost
+    car['hp'] += hp_increase
+    save_data(user_data, USERS_DB_FILE)
+
+    message.reply(f"✅ Двигатель улучшен! +{format_number(hp_increase)} л.с. (-{cost} руб.)")
 
 def upgrade_speed(message):
-    """Улучшение скорости"""
+    user_data = load_data(USERS_DB_FILE)
     user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
-    
-    if not user:
+
+    if user_id not in user_data.get('users', {}):
         return message.reply("❌ Сначала зарегистрируйтесь!")
 
-    cars = user.get('cars', {})
-    if not cars:
+    user = user_data['users'][user_id]
+
+    if not user.get('cars'):
         return message.reply("❌ У вас нет машин!")
 
     active_car_id = user.get('active_car')
-    if not active_car_id or active_car_id not in cars:
+    if not active_car_id or active_car_id not in user['cars']:
         return message.reply("❌ Сначала выберите активную машину!")
 
-    car = cars[active_car_id]
-    
+    car = user['cars'][active_car_id]
+
     cost = 3000
-    if user.get('money', 0) < cost:
+    if user['money'] < cost:
         return message.reply(f"❌ Недостаточно денег! Нужно: {cost} руб.")
 
-    speed_increase = int(car.get('max_speed', 0) * 0.05)
-    new_speed = car.get('max_speed', 0) + speed_increase
-    
-    updates = {
-        'money': user.get('money', 0) - cost,
-        f'cars/{active_car_id}/max_speed': new_speed
-    }
-    
-    success = update_user_data(user_id, updates)
-    
-    if success:
-        message.reply(f"✅ Скорость улучшена! +{format_number(speed_increase)} км/ч (-{cost} руб.)")
-    else:
-        message.reply("❌ Ошибка при улучшении скорости.")
+    speed_increase = int(car['max_speed'] * 0.05)
+    user['money'] -= cost
+    car['max_speed'] += speed_increase
+    save_data(user_data, USERS_DB_FILE)
+
+    message.reply(f"✅ Скорость улучшена! +{format_number(speed_increase)} км/ч (-{cost} руб.)")
 
 def select_car(message):
-    """Выбор активной машины"""
+    user_data = load_data(USERS_DB_FILE)
     user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
-    
-    if not user:
+
+    if user_id not in user_data.get('users', {}):
         return message.reply("❌ Сначала зарегистрируйтесь!")
 
+    user = user_data['users'][user_id]
     cars = user.get('cars', {})
+
     if not cars:
         return message.reply("❌ У вас нет машин! Посетите автосалон.")
 
@@ -561,11 +834,11 @@ def select_car(message):
 
         is_active = user.get('active_car') == car_id
         button_color = VkKeyboardColor.POSITIVE if is_active else VkKeyboardColor.SECONDARY
-        keyboard.add_button(f"{car_data.get('name', 'Машина')}{' ✅' if is_active else ''}",
+        keyboard.add_button(f"{car_data['name']}{' ✅' if is_active else ''}",
                            button_color,
                            payload={'cmd': 'set_active_car', 'car_id': car_id})
 
-        text += f"{'➤ ' if is_active else '  '}{car_data.get('name', 'Машина')} - {format_number(car_data.get('hp', 0))} л.с., {format_number(car_data.get('max_speed', 0))} км/ч\n"
+        text += f"{'➤ ' if is_active else '  '}{car_data['name']} - {format_number(car_data['hp'])} л.с., {format_number(car_data['max_speed'])} км/ч\n"
 
     keyboard.add_line()
     keyboard.add_button("🚗 Гараж", VkKeyboardColor.PRIMARY, payload={'cmd': 'garage'})
@@ -573,37 +846,35 @@ def select_car(message):
     message.reply(text, keyboard=keyboard.get_keyboard())
 
 def set_active_car(message, car_id):
-    """Установить активную машину"""
+    user_data = load_data(USERS_DB_FILE)
     user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
-    
-    if not user:
+
+    if user_id not in user_data.get('users', {}):
         return message.reply("❌ Сначала зарегистрируйтесь!")
 
-    cars = user.get('cars', {})
-    if car_id not in cars:
+    user = user_data['users'][user_id]
+
+    if car_id not in user.get('cars', {}):
         return message.reply("❌ Машина не найдена!")
 
-    success = update_user_data(user_id, {'active_car': car_id})
-    
-    if success:
-        car_name = cars[car_id].get('name', 'Машина')
-        message.reply(f"✅ {car_name} теперь ваша активная машина!")
-    else:
-        message.reply("❌ Ошибка при выборе машины.")
+    user['active_car'] = car_id
+    save_data(user_data, USERS_DB_FILE)
 
-# ==================== СИСТЕМА ГОНОК ====================
+    car_name = user['cars'][car_id]['name']
+    message.reply(f"✅ {car_name} теперь ваша активная машина!")
 
+# СИСТЕМА ГОНОК
 def show_races(message):
-    """Показать гонки"""
     if message.is_private:
         return show_global_races(message)
 
+    db = load_data(USERS_DB_FILE)
     user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
-    
-    if not user:
+
+    if user_id not in db.get('users', {}):
         return message.reply("❌ У вас нет аккаунта в боте! Напишите 'Начать' для регистрации.")
+
+    user = db['users'][user_id]
 
     if not user.get('cars'):
         return message.reply("❌ У вас нет машин! Сначала купите машину в автосалоне.")
@@ -617,7 +888,6 @@ def show_races(message):
         return create_race_menu(message)
 
 def create_race_menu(message):
-    """Меню создания гонки"""
     text = "🏎️ ГОНКИ!\n\n"
     text += "Вы можете создать гонку в этом чате.\n"
     text += f"📍 Дистанция: {format_number(RACE_DISTANCE)}м\n"
@@ -631,17 +901,18 @@ def create_race_menu(message):
     message.reply(text, keyboard=keyboard.get_keyboard(), attachment="photo-233724428_456239020")
 
 def create_race(message):
-    """Создать гонку"""
     chat_id = str(message.peer_id)
 
     if chat_id in local_races:
         return message.reply("❌ В этом чате уже есть активная гонка!")
 
+    user_data = load_data(USERS_DB_FILE)
     user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
-    
-    if not user:
+
+    if user_id not in user_data.get('users', {}):
         return message.reply("❌ Сначала зарегистрируйтесь!")
+
+    user = user_data['users'][user_id]
 
     if not user.get('cars'):
         return message.reply("❌ У вас нет машин! Сначала купите машину.")
@@ -652,8 +923,8 @@ def create_race(message):
 
     if not active_car_id or active_car_id not in cars:
         active_car_id = list(cars.keys())[0]
-        update_user_data(user_id, {'active_car': active_car_id})
-        user = get_user_by_id(user_id)  # Обновляем данные
+        user['active_car'] = active_car_id
+        save_data(user_data, USERS_DB_FILE)
 
     car_data = cars[active_car_id]
 
@@ -662,7 +933,7 @@ def create_race(message):
     race = Race(race_id, chat_id, message.from_id, is_global=False)
 
     # Добавляем создателя в гонку
-    success, msg = race.add_player(message.from_id, user.get('username', 'Игрок'), car_data)
+    success, msg = race.add_player(message.from_id, user['username'], car_data)
 
     local_races[chat_id] = race
 
@@ -675,21 +946,24 @@ def create_race(message):
         keyboard.add_button("🏁 Начать гонку", VkKeyboardColor.PRIMARY, payload={'cmd': 'start_race'})
     keyboard.add_callback_button("❌ Выйти", VkKeyboardColor.NEGATIVE, payload={'cmd': 'leave_race'})
 
-    message.reply(race_text, keyboard=keyboard.get_keyboard(), attachment="photo-233724428_456239020")
+    result = message.reply(race_text, keyboard=keyboard.get_keyboard(), attachment="photo-233724428_456239020")
+
+    return True
 
 def join_race(message):
-    """Присоединиться к гонке"""
     chat_id = str(message.peer_id)
 
     if chat_id not in local_races:
         return message.reply("❌ В этом чате нет активной гонка!")
 
     race = local_races[chat_id]
+    user_data = load_data(USERS_DB_FILE)
     user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
-    
-    if not user:
+
+    if user_id not in user_data.get('users', {}):
         return message.reply("❌ Сначала зарегистрируйтесь!")
+
+    user = user_data['users'][user_id]
 
     if not user.get('cars'):
         return message.reply("❌ У вас нет машин!")
@@ -703,7 +977,7 @@ def join_race(message):
 
     car_data = cars[active_car_id]
 
-    success, msg = race.add_player(message.from_id, user.get('username', 'Игрок'), car_data)
+    success, msg = race.add_player(message.from_id, user['username'], car_data)
 
     if success:
         # Отправляем новое сообщение с обновленным списком игроков
@@ -714,13 +988,13 @@ def join_race(message):
         if race.creator_id in race.players:
             keyboard.add_button("🏁 Начать гонку", VkKeyboardColor.PRIMARY, payload={'cmd': 'start_race'})
         keyboard.add_callback_button("❌ Выйти", VkKeyboardColor.NEGATIVE, payload={'cmd': 'leave_race'})
-        message.reply(f"✅ {user.get('username', 'Игрок')} присоединился к гонке!")
+        message.reply(f"✅ {user['username']} присоединился к гонке!")
         message.reply(race_text, keyboard=keyboard.get_keyboard(), attachment="photo-233724428_456239020")
+
     else:
         message.reply(f"❌ {msg}")
 
 def leave_race(message):
-    """Выйти из гонки"""
     chat_id = str(message.peer_id)
 
     if chat_id not in local_races:
@@ -750,8 +1024,8 @@ def leave_race(message):
         message.reply(f"✅ {player_name} вышел из гонки")
         message.reply(race_text, keyboard=keyboard.get_keyboard(), attachment="photo-233724428_456239020")
 
+
 def start_race(message):
-    """Начать гонку"""
     chat_id = str(message.peer_id)
 
     if chat_id not in local_races:
@@ -770,7 +1044,6 @@ def start_race(message):
         message.reply(f"❌ {msg}")
 
 def show_race_status(message, race=None):
-    """Показать статус гонки"""
     if not race:
         chat_id = str(message.peer_id)
         if chat_id not in local_races:
@@ -788,10 +1061,10 @@ def show_race_status(message, race=None):
         keyboard.add_line()
         keyboard.add_callback_button("❌ Выйти", VkKeyboardColor.NEGATIVE, payload={'cmd': 'leave_race'})
     elif race.status == "in_progress":
-        attachment = "photo-233724428_456239023"
+        attachment="photo-233724428_456239023"
         keyboard.add_button("🔄 Обновить", VkKeyboardColor.SECONDARY, payload={'cmd': 'race_status'})
     else:
-        attachment = "photo-233724428_456239020"
+        attachment="photo-233724428_456239020"
         keyboard.add_button("🏎️ Новая гонка", VkKeyboardColor.POSITIVE, payload={'cmd': 'create_race'})
 
     message.reply(race_text, keyboard=keyboard.get_keyboard(), attachment=attachment)
@@ -830,49 +1103,38 @@ def run_race_updates(message, race):
 
 def award_players(race):
     """Выдача наград за гонку"""
+    user_data = load_data(USERS_DB_FILE)
+
     for user_id, player in race.players.items():
         user_id_str = str(user_id)
-        user = get_user_by_id(user_id_str)
-        
-        if not user:
-            continue
+        if user_id_str in user_data.get('users', {}):
+            user = user_data['users'][user_id_str]
 
-        # Награды в зависимости от позиции
-        if player['position'] == 1:
-            reward = 1000
-            exp = 50
-        elif player['position'] == 2:
-            reward = 600
-            exp = 30
-        elif player['position'] == 3:
-            reward = 300
-            exp = 20
-        else:
-            reward = 100
-            exp = 10
+            # Награды в зависимости от позиции
+            if player['position'] == 1:
+                reward = 1000
+                exp = 50
+            elif player['position'] == 2:
+                reward = 600
+                exp = 30
+            elif player['position'] == 3:
+                reward = 300
+                exp = 20
+            else:
+                reward = 100
+                exp = 10
 
-        updates = {
-            'money': user.get('money', 0) + reward,
-            'exp': user.get('exp', 0) + exp
-        }
+            user['money'] += reward
+            user['exp'] += exp
 
-        # Сохраняем обновления
-        update_user_data(user_id_str, updates)
-        
-        # Проверяем повышение уровня
-        user['money'] = updates['money']
-        user['exp'] = updates['exp']
-        levels_gained = check_level_up(user)
-        
-        if levels_gained > 0:
-            update_user_data(user_id_str, {
-                'level': user['level'],
-                'exp': user['exp'],
-                'money': user['money'] + levels_gained * LEVEL_REWARD
-            })
+            # Проверка повышения уровня
+            levels_gained = check_level_up(user)
+            if levels_gained > 0:
+                user['money'] += levels_gained * LEVEL_REWARD
 
-# ==================== ДРАГ-РЕЙСИНГ ====================
+    save_data(user_data, USERS_DB_FILE)
 
+# ДРАГ-РЕЙСИНГ
 def handle_drag_race(message):
     """Обработка команды драг-рейсинга"""
     text = message.text.lower()
@@ -891,17 +1153,18 @@ def handle_drag_race(message):
         return message.reply("❌ Нельзя устраивать драг с самим собой!")
 
     # Проверяем, что оба игрока зарегистрированы
+    user_data = load_data(USERS_DB_FILE)
     user_id_str = str(message.from_id)
     target_id_str = str(target_id)
-    
-    user = get_user_by_id(user_id_str)
-    target_user = get_user_by_id(target_id_str)
 
-    if not user:
+    if user_id_str not in user_data.get('users', {}):
         return message.reply("❌ Сначала зарегистрируйтесь в боте!")
 
-    if not target_user:
+    if target_id_str not in user_data.get('users', {}):
         return message.reply("❌ Этот пользователь не зарегистрирован в боте!")
+
+    user = user_data['users'][user_id_str]
+    target_user = user_data['users'][target_id_str]
 
     if not user.get('cars') or not target_user.get('cars'):
         return message.reply("❌ У кого-то из игроков нет машин!")
@@ -914,14 +1177,14 @@ def handle_drag_race(message):
     user_car = user['cars'].get(user.get('active_car')) or list(user['cars'].values())[0]
     target_car = target_user['cars'].get(target_user.get('active_car')) or list(target_user['cars'].values())[0]
 
-    drag_race.add_player(message.from_id, user.get('username', 'Игрок'), user_car)
-    drag_race.add_player(target_id, target_user.get('username', 'Игрок'), target_car)
+    drag_race.add_player(message.from_id, user['username'], user_car)
+    drag_race.add_player(target_id, target_user['username'], target_car)
 
     drag_races[drag_id] = drag_race
 
     # Отправляем сообщение о вызове
     challenge_text = f"🔥 ВЫЗОВ НА ДРАГ-РЕЙСИНГ! 🔥\n\n"
-    challenge_text += f"{user.get('username', 'Игрок')} вызывает {target_user.get('username', 'Игрок')} на гонку!\n"
+    challenge_text += f"{user['username']} вызывает {target_user['username']} на гонку!\n"
     challenge_text += f"📍 Дистанция: 400м\n\n"
     challenge_text += f"Готовы ли вы принять вызов?"
 
@@ -967,7 +1230,7 @@ def run_drag_race(message, drag_race, drag_id):
         if finished:
             break
 
-        time.sleep(0.5)
+        time.sleep(0.5)  # небольшая пауза между обновлениями состояния
 
     # Завершаем драг
     if drag_race.status == "in_progress":
@@ -985,7 +1248,7 @@ def run_drag_race(message, drag_race, drag_id):
     if not winner_id:
         # Если нет победителя по времени, выбираем по прогрессу
         max_progress = 0
-        for user_id, player in drag_races.items():
+        for user_id, player in drag_race.players.items():
             if player['progress'] > max_progress:
                 max_progress = player['progress']
                 winner_id = user_id
@@ -995,22 +1258,19 @@ def run_drag_race(message, drag_race, drag_id):
         message.reply(f"🏆 ПОБЕДИТЕЛЬ: {winner_name}!")
 
         # Награждаем победителя
-        user = get_user_by_id(str(winner_id))
-        if user:
-            updates = {
-                'money': user.get('money', 0) + 500,
-                'exp': user.get('exp', 0) + 25
-            }
-            update_user_data(str(winner_id), updates)
+        user_data = load_data(USERS_DB_FILE)
+        if str(winner_id) in user_data.get('users', {}):
+            user = user_data['users'][str(winner_id)]
+            user['money'] += 500
+            user['exp'] += 25
+            save_data(user_data, USERS_DB_FILE)
 
     # Удаляем драг из активных
     if drag_id in drag_races:
         del drag_races[drag_id]
 
-# ==================== ГЛОБАЛЬНЫЕ ГОНКИ ====================
-
+# ГЛОБАЛЬНЫЕ ГОНКИ
 def show_global_races(message):
-    """Показать глобальные гонки"""
     text = "🌍 ГЛОБАЛЬНЫЕ ГОНКИ\n\n"
     text += f"📍 Дистанция: {format_number(GLOBAL_RACE_DISTANCE)}м\n"
     text += f"⏰ Время ожидания: 15 минут\n"
@@ -1026,22 +1286,22 @@ def show_global_races(message):
     message.reply(text, keyboard=keyboard.get_keyboard())
 
 def find_global_race(message):
-    """Найти глобальную гонку"""
     message.reply("🌍 Система глобальных гонок находится в разработке. Скоро будет доступна!")
 
 def my_results(message):
-    """Показать результаты пользователя"""
+    user_data = load_data(USERS_DB_FILE)
     user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
-    
-    if not user:
+
+    if user_id not in user_data.get('users', {}):
         return message.reply("❌ Сначала зарегистрируйтесь!")
 
+    user = user_data['users'][user_id]
+
     text = f"📊 СТАТИСТИКА ИГРОКА\n\n"
-    text += f"👤 {user.get('username', 'Игрок')}\n"
-    text += f"💰 Баланс: {format_number(user.get('money', 0))} руб.\n"
-    text += f"⭐ Уровень: {user.get('level', 1)}\n"
-    text += f"📈 Опыт: {user.get('exp', 0)}/100\n"
+    text += f"👤 {user['username']}\n"
+    text += f"💰 Баланс: {format_number(user['money'])} руб.\n"
+    text += f"⭐ Уровень: {user['level']}\n"
+    text += f"📈 Опыт: {user['exp']}/100\n"
     text += f"🚗 Машин в гараже: {len(user.get('cars', {}))}\n\n"
 
     text += "🏆 Статистика:\n"
@@ -1050,22 +1310,719 @@ def my_results(message):
 
     message.reply(text)
 
-# ==================== PvP ГОНКИ ====================
+# ОСНОВНЫЕ ФУНКЦИИ
+def reg_user(message):
+    db = load_data(USERS_DB_FILE)
+    user_id = str(message.from_id)
 
-def handle_pvp_command(message):
-    """Обработка команды PvP гонки"""
-    if message.is_private:
-        return start_pvp_race(message)
+    if user_id in db.get('users', {}):
+        message.reply("❌ Вы уже зарегистрированы в боте!")
+        show_menu(message)
+        return
+
+    if message.is_group_chat:
+        return message.reply("❌ Регистрация в боте возможна только в лс бота.")
+    if message.isMember(user_id=user_id) == False:
+        return message.reply("🙃 Регистрация в боте невозможна, если вы не подписаны на него!")
+
+    db.setdefault('users', {})[user_id] = {
+        'username': message.full_name,
+        'money': 5000,
+        'exp': 0,
+        'level': 1,
+        'cars': {},
+        'active_car': None,
+        'referral_code': f"ref_{user_id}",
+        'referred_by': None,
+        'pistons': 0,
+        'site': {
+            "password": f"{user_id}_password"
+        }
+    }
+
+    save_data(db, USERS_DB_FILE)
+    keyboard = VkKeyboard(inline=True)
+    keyboard.add_openlink_button("📚 Правила бота", "https://vk.com/@gonka_bot-rules")
+    keyboard.add_line()
+    keyboard.add_vkapps_button(
+        app_id=6441755,
+        owner_id=-233724428,
+        label="➕ Добавить в чат",
+        hash=""
+    )
+
+    message.reply(f"😁 Отлично, {message.get_mention(message.from_id)}, регистрация прошла успешно!\n\n🎮 Теперь вы можете участвовать в гонках и покупать машины!\n\n⚠️ Чтобы начать участвовать в гонках, купите первую машину, написав: автосалон", keyboard=keyboard.get_keyboard())
+
+def show_commands(message):
+    db = load_data(USERS_DB_FILE)
+    user_id = str(message.from_id)
+
+    if user_id not in db.get('users', {}):
+        return message.reply("❌ У вас нет аккаунта в боте! Напишите 'Начать' для регистрации.")
+
+    text = f"📚 Привет, {message.get_mention(message.from_id)}, вот все команды бота:\n\n"
+    text += f"🏎️ ОСНОВНЫЕ КОМАНДЫ:\n"
+    text += f"- Меню - главное меню бота\n"
+    text += f"- Помощь - показать команды\n"
+    text += f"- Гонка - меню гонок\n"
+    text += f"- Сайт - получить данные о сайте (при входе)\n"
+    text += f"- Поддержка - поддержка бота\n\n"
+
+    text += f"🚗 АВТОМОБИЛИ:\n"
+    text += f"- Гараж - ваши машины\n"
+    text += f"- Автосалон - купить машину\n"
+    text += f"- Техцентр - улучшить машину\n\n"
+
+    text += f"🎮 В ЧАТАХ:\n"
+    text += f"- Гонка - создать/присоединиться к гонке\n"
+    text += f"- Старт - начать гонку\n"
+    text += f"- Драг [@игрок] - вызвать на драг-рейсинг\n\n"
+
+    text += f"🙂 Команды будут добавляться, следите за новостями!"
+    message.reply(text)
+
+password_hot = []
+
+def show_site(message):
+    db = load_data(USERS_DB_FILE)
+    user_id = str(message.from_id)
+    user = db['users'][user_id]
+    text = "🌐 Сайт: https://racebotvk--bisekeevdenis6.replit.app\n"
+    text += f"🔑 Пароль: {user['site']['password']}\n"
+    text += f"📝 Логин (user_id): {user_id}"
+    keyboard = VkKeyboard(inline=True)
+    keyboard.add_openlink_button("🌐 Открыть сайт", "https://racebotvk--bisekeevdenis6.replit.app")
+    keyboard.add_line()
+    keyboard.add_button("🔄 Обновить пароль", VkKeyboardColor.PRIMARY, payload={'cmd': 'site_update'})
+    
+    message.reply(text, keyboard=keyboard.get_keyboard())
+
+def handle_password_update(message):
+    password_hot.append(message.from_id)
+    message.reply("🔄 Введите новый пароль:")
+
+def update_password(message):
+    db = load_data(USERS_DB_FILE)
+    user_id = str(message.from_id)
+    user = db['users'][user_id]
+    new_password = message.text
+    user['site']['password'] = new_password
+    save_data(db, USERS_DB_FILE)
+    password_hot.remove(int(user_id))
+    message.reply("✅ Пароль успешно обновлен!")
+
+
+    
+    
+
+def welcome_message(message):
+    text = "🏎️ Добро пожаловать в Гонки Бот!\n\n"
+    text += "Я помогу вам организовать захватывающие гоночные соревнования!\n\n"
+    text += "📋 Основные команды:\n"
+    text += "• 'Гонка' - создать/присоединиться к гонке\n"
+    text += "• 'Меню' - показать главное меню\n"
+    text += "• 'Помощь' - список всех команд\n"
+    text += "• 'Драг @игрок' - вызвать на драг-рейсинг\n\n"
+    text += "🚀 Чтобы начать, напишите 'Гонка' и создайте свою первую гонку!"
+
+    message.reply(text)
+
+def admin_add_premium(message, chat_id):
+    db = load_data(CHATS_DB_FILE)
+    if str(chat_id) not in db.get('chats', {}):
+        return message.reply("⚠️ Этого чата нет в базе данных!")
+    chat = db['chats'][str(chat_id)]
+    if chat['premium'] != False:
+        return message.reply("⚠️ У этого чата уже есть Premium")
+    chat['premium'] = True
+    save_data(db, CHATS_DB_FILE)
+    message.reply("✅ Успешно!")
+# Добавляем в начало файла с другими глобальными переменными
+klans_data = {}
+
+def load_klans_data():
+    """Загрузка данных кланов"""
+    global klans_data
+    try:
+        with open('klans.json', 'r', encoding='utf-8') as f:
+            klans_data = json.load(f)
+    except FileNotFoundError:
+        klans_data = {"klans": {}, "klan_battles": {}, "next_klan_id": 1}
+        save_klans_data()
+
+def save_klans_data():
+    """Сохранение данных кланов"""
+    with open('klans.json', 'w', encoding='utf-8') as f:
+        json.dump(klans_data, f, ensure_ascii=False, indent=2)
+
+# Вызываем при старте
+load_klans_data()
+
+def handle_klan_command(message, args=None):
+    """Обработка команд кланов"""
+    if not args:
+        return show_klan_menu(message)
+
+    command = args[0].lower()
+
+    if command == "создать":
+        create_klan(message, args[1:])
+    elif command == "удалить":
+        delete_klan(message)
+    elif command == "приглос":
+        invite_to_klan(message, args[1:])
+    elif command == "кик":
+        kick_from_klan(message, args[1:])
+    elif command == "гонка":
+        start_klan_battle(message)
+    elif command == "инфо":
+        show_klan_info(message)
+    elif command == "выйти":
+        leave_klan(message)
+    elif command == "принять":
+        accept_klan_invite(message, args[1:])
+    elif command == "отклонить":
+        decline_klan_invite(message, args[1:]) #type: ignor
     else:
-        return message.reply("❌ PvP гонки доступны только в личных сообщениях с ботом!")
+        show_klan_menu(message)
+
+def show_klan_menu(message):
+    """Показать меню кланов"""
+    text = "🏆 СИСТЕМА КЛАНОВ\n\n"
+    text += "Объединяйтесь с друзьями и соревнуйтесь с другими кланами!\n\n"
+    text += "📋 Команды кланов:\n"
+    text += "• клан создать [название] [тег] - создать клан\n"
+    text += "• клан инфо - информация о вашем клане\n"
+    text += "• клан приглос [@игрок] - пригласить в клан\n"
+    text += "• клан кик [@игрок] - исключить из клана\n"
+    text += "• клан гонка - начать битву кланов\n"
+    text += "• клан выйти - покинуть клан\n"
+    text += "• клан удалить - удалить клан (только лидер)\n\n"
+    text += "👥 Максимум участников: 15\n"
+    text += "⚔️ Битвы: гонка 5 на 5"
+
+    user_klan = get_user_klan(message.from_id)
+    if user_klan:
+        klan_info = klans_data['klans'][user_klan]
+        text += f"\n\n🏁 Ваш клан: {klan_info['name']} [{klan_info['tag']}]"
+
+    keyboard = VkKeyboard(inline=True)
+
+    if not user_klan:
+        keyboard.add_button("🏆 Создать клан", VkKeyboardColor.POSITIVE,
+                          payload={'cmd': 'klan_create_menu'})
+        keyboard.add_line()
+    else:
+        keyboard.add_button("📊 Инфо о клане", VkKeyboardColor.PRIMARY,
+                          payload={'cmd': 'klan_info'})
+        keyboard.add_button("👥 Участники", VkKeyboardColor.PRIMARY,
+                          payload={'cmd': 'klan_members'})
+        keyboard.add_line()
+        keyboard.add_button("⚔️ Битва кланов", VkKeyboardColor.NEGATIVE,
+                          payload={'cmd': 'klan_battle'})
+
+    keyboard.add_button("🏆 Топ кланов", VkKeyboardColor.SECONDARY,
+                      payload={'cmd': 'klan_top'})
+
+    message.reply(text, keyboard=keyboard.get_keyboard())
+
+def create_klan(message, args):
+    """Создание клана"""
+    user_id = str(message.from_id)
+
+    # Проверяем, не состоит ли уже в клане
+    if get_user_klan(message.from_id):
+        return message.reply("❌ Вы уже состоите в клане!")
+
+    # Проверяем аргументы
+    if len(args) < 2:
+        return message.reply("❌ Использование: клан создать [название] [тег]\nПример: клан создать ГонщикиПро GP")
+
+    name = args[0]
+    tag = args[1].upper()
+
+    # Проверяем длину названия и тега
+    if len(name) > 20:
+        return message.reply("❌ Название клана не должно превышать 20 символов!")
+
+    if len(tag) > 5:
+        return message.reply("❌ Тег клана не должен превышать 5 символов!")
+
+    # Проверяем уникальность названия и тега
+    for klan_id, klan in klans_data['klans'].items():
+        if klan['name'].lower() == name.lower():
+            return message.reply("❌ Клан с таким названием уже существует!")
+        if klan['tag'].upper() == tag.upper():
+            return message.reply("❌ Клан с таким тегом уже существует!")
+
+    # Создаем клан
+    klan_id = str(klans_data['next_klan_id'])
+    klans_data['next_klan_id'] += 1
+
+    user_data = load_data(USERS_DB_FILE)
+    username = user_data['users'][user_id]['username']
+
+    klans_data['klans'][klan_id] = {
+        "name": name,
+        "tag": tag,
+        "creator_id": message.from_id,
+        "members": {
+            user_id: {
+                "username": username,
+                "role": "leader",
+                "join_date": datetime.datetime.now().isoformat()
+            }
+        },
+        "created_date": datetime.datetime.now().isoformat(),
+        "level": 1,
+        "exp": 0,
+        "wins": 0,
+        "losses": 0,
+        "description": "Новый гоночный клан"
+    }
+
+    save_klans_data()
+
+    message.reply(f"✅ Клан '{name}' [{tag}] успешно создан!\nИспользуйте 'клан приглос [@игрок]' чтобы пригласить друзей.")
+
+def get_user_klan(user_id):
+    """Получить ID клана пользователя"""
+    user_id_str = str(user_id)
+    for klan_id, klan in klans_data['klans'].items():
+        if user_id_str in klan['members']:
+            return klan_id
+    return None
+
+def show_klan_info(message):
+    """Показать информацию о клане"""
+    klan_id = get_user_klan(message.from_id)
+
+    if not klan_id:
+        return message.reply("❌ Вы не состоите в клане!")
+
+    klan = klans_data['klans'][klan_id]
+
+    text = f"🏆 ИНФОРМАЦИЯ О КЛАНЕ\n\n"
+    text += f"🏁 Название: {klan['name']} [{klan['tag']}]\n"
+    text += f"⭐ Уровень: {klan['level']}\n"
+    text += f"📊 Опыт: {format_number(klan['exp'])}\n"
+    text += f"👥 Участников: {len(klan['members'])}/15\n"
+    text += f"⚔️ Побед/Поражений: {klan['wins']}/{klan['losses']}\n"
+    text += f"📝 Описание: {klan['description']}\n\n"
+
+    # Сортируем участников по роли
+    leaders = []
+    members = []
+
+    for member_id, member_data in klan['members'].items():
+        if member_data['role'] == 'leader':
+            leaders.append(member_data['username'])
+        else:
+            members.append(member_data['username'])
+
+    text += "👑 Лидеры:\n"
+    for leader in leaders:
+        text += f"• {leader}\n"
+
+    if members:
+        text += "\n👥 Участники:\n"
+        for member in members:
+            text += f"• {member}\n"
+
+    keyboard = VkKeyboard(inline=True)
+    keyboard.add_button("👥 Участники", VkKeyboardColor.PRIMARY, payload={'cmd': 'klan_members'})
+    keyboard.add_button("⚔️ Битва", VkKeyboardColor.NEGATIVE, payload={'cmd': 'klan_battle'})
+    keyboard.add_line()
+    keyboard.add_button("📤 Пригласить", VkKeyboardColor.POSITIVE, payload={'cmd': 'klan_invite_menu'})
+
+    message.reply(text, keyboard=keyboard.get_keyboard())
+
+def invite_to_klan(message, args):
+    """Пригласить пользователя в клан"""
+    klan_id = get_user_klan(message.from_id)
+
+    if not klan_id:
+        return message.reply("❌ Вы не состоите в клане!")
+
+    klan = klans_data['klans'][klan_id]
+
+    # Проверяем права
+    user_id_str = str(message.from_id)
+    if klan['members'][user_id_str]['role'] != 'leader':
+        return message.reply("❌ Только лидеры клана могут приглашать игроков!")
+
+    # Проверяем лимит участников
+    if len(klan['members']) >= 15:
+        return message.reply("❌ В клане достигнут лимит участников (15)!")
+
+    if not args:
+        return message.reply("❌ Укажите пользователя для приглашения!\nПример: клан приглос @username")
+
+    target_text = args[0]
+    target_id = message.extract_user_id(target_text)
+
+    if not target_id:
+        return message.reply("❌ Не удалось определить пользователя!")
+
+    if target_id == message.from_id:
+        return message.reply("❌ Нельзя пригласить самого себя!")
+
+    # Проверяем, не состоит ли уже в клане
+    if get_user_klan(target_id):
+        return message.reply("❌ Этот пользователь уже состоит в клане!")
+
+    # Проверяем, что пользователь зарегистрирован в боте
+    user_data = load_data(USERS_DB_FILE)
+    if str(target_id) not in user_data.get('users', {}):
+        return message.reply("❌ Этот пользователь не зарегистрирован в боте!")
+
+    # Создаем приглашение
+    invite_id = f"{klan_id}_{target_id}"
+
+    keyboard = VkKeyboard(inline=True)
+    keyboard.add_button("✅ Принять", VkKeyboardColor.POSITIVE,
+                       payload={'cmd': 'klan_accept', 'invite_id': invite_id})
+    keyboard.add_button("❌ Отклонить", VkKeyboardColor.NEGATIVE,
+                       payload={'cmd': 'klan_decline', 'invite_id': invite_id})
+
+    target_user_data = user_data['users'][str(target_id)]
+    inviter_name = klan['members'][str(message.from_id)]['username']
+
+    # Отправляем приглашение целевому пользователю
+    try:
+        invite_text = f"🎯 ПРИГЛАШЕНИЕ В КЛАН!\n\n"
+        invite_text += f"{inviter_name} приглашает вас в клан {klan['name']} [{klan['tag']}]\n\n"
+        invite_text += f"📊 Информация о клане:\n"
+        invite_text += f"• Уровень: {klan['level']}\n"
+        invite_text += f"• Участников: {len(klan['members'])}/15\n"
+        invite_text += f"• Побед: {klan['wins']}\n\n"
+        invite_text += f"Примите приглашение чтобы присоединиться!"
+
+        message.reply(invite_text, keyboard=keyboard.get_keyboard(), peer_id=target_id)
+        message.reply(f"✅ Приглашение отправлено {target_user_data['username']}!")
+    except Exception as e:
+        message.reply("❌ Не удалось отправить приглашение. Возможно, пользователь заблокировал бота.")
+
+def accept_klan_invite(message, args):
+    """Принять приглашение в клан"""
+    user_id = str(message.from_id)
+
+    if get_user_klan(message.from_id):
+        return message.reply("❌ Вы уже состоите в клане!")
+
+    if not args:
+        return message.reply("❌ Не указан ID приглашения!")
+
+    invite_id = args[0]
+    parts = invite_id.split('_')
+
+    if len(parts) != 2:
+        return message.reply("❌ Неверный формат приглашения!")
+
+    klan_id, target_id = parts
+
+    if str(message.from_id) != target_id:
+        return message.reply("❌ Это приглашение не для вас!")
+
+    if klan_id not in klans_data['klans']:
+        return message.reply("❌ Клан больше не существует!")
+
+    klan = klans_data['klans'][klan_id]
+
+    # Проверяем лимит участников
+    if len(klan['members']) >= 15:
+        return message.reply("❌ В клане достигнут лимит участников!")
+
+    # Добавляем в клан
+    user_data = load_data(USERS_DB_FILE)
+    username = user_data['users'][user_id]['username']
+
+    klan['members'][user_id] = {
+        "username": username,
+        "role": "member",
+        "join_date": datetime.datetime.now().isoformat()
+    }
+
+    save_klans_data()
+
+    message.reply(f"✅ Вы присоединились к клану {klan['name']} [{klan['tag']}]!")
+
+    # Уведомляем лидеров клана
+    for member_id, member_data in klan['members'].items():
+        if member_data['role'] == 'leader' and int(member_id) != message.from_id:
+            try:
+                message.reply(f"🎉 {username} присоединился к вашему клану!", peer_id=int(member_id))
+            except:
+                pass
+
+def kick_from_klan(message, args):
+    """Исключить пользователя из клана"""
+    klan_id = get_user_klan(message.from_id)
+
+    if not klan_id:
+        return message.reply("❌ Вы не состоите в клане!")
+
+    klan = klans_data['klans'][klan_id]
+    user_id_str = str(message.from_id)
+
+    # Проверяем права
+    if klan['members'][user_id_str]['role'] != 'leader':
+        return message.reply("❌ Только лидеры клана могут исключать игроков!")
+
+    if not args:
+        return message.reply("❌ Укажите пользователя для исключения!\nПример: клан кик @username")
+
+    target_text = args[0]
+    target_id = message.extract_user_id(target_text)
+
+    if not target_id:
+        return message.reply("❌ Не удалось определить пользователя!")
+
+    target_id_str = str(target_id)
+
+    if target_id == message.from_id:
+        return message.reply("❌ Нельзя исключить самого себя!")
+
+    if target_id_str not in klan['members']:
+        return message.reply("❌ Этот пользователь не состоит в вашем клане!")
+
+    # Исключаем
+    kicked_name = klan['members'][target_id_str]['username']
+    del klan['members'][target_id_str]
+
+    save_klans_data()
+
+    message.reply(f"✅ {kicked_name} исключен из клана!")
+
+    # Уведомляем исключенного
+    try:
+        message.reply(f"❌ Вы были исключены из клана {klan['name']} [{klan['tag']}]!", peer_id=target_id)
+    except:
+        pass
+
+def start_klan_battle(message):
+    """Начать битву кланов"""
+    klan_id = get_user_klan(message.from_id)
+
+    if not klan_id:
+        return message.reply("❌ Вы не состоите в клане!")
+
+    klan = klans_data['klans'][klan_id]
+
+    # Проверяем количество участников
+    if len(klan['members']) < 5:
+        return message.reply("❌ Для битвы кланов нужно минимум 5 участников в клане!")
+
+    # Ищем случайного противника
+    available_klans = []
+    for other_klan_id, other_klan in klans_data['klans'].items():
+        if (other_klan_id != klan_id and
+            len(other_klan['members']) >= 5 and
+            other_klan_id not in klans_data.get('klan_battles', {})):
+            available_klans.append((other_klan_id, other_klan))
+
+    if not available_klans:
+        return message.reply("❌ Нет доступных кланов для битвы! Попробуйте позже.")
+
+    # Выбираем случайного противника
+    opponent_klan_id, opponent_klan = random.choice(available_klans)
+
+    # Создаем битву
+    battle_id = f"{klan_id}_{opponent_klan_id}_{int(time.time())}"
+
+    klans_data.setdefault('klan_battles', {})[battle_id] = {
+        "klan1_id": klan_id,
+        "klan2_id": opponent_klan_id,
+        "status": "waiting",
+        "created_time": time.time(),
+        "players": {},
+        "results": {}
+    }
+
+    save_klans_data()
+
+    text = f"⚔️ БИТВА КЛАНОВ НАЧАЛАСЬ!\n\n"
+    text += f"🏁 {klan['name']} [{klan['tag']}] vs {opponent_klan['name']} [{opponent_klan['tag']}]\n\n"
+    text += f"Участники, присоединяйтесь к битве!\n"
+    text += f"Напишите 'битва присоединиться {battle_id}'"
+
+    # Уведомляем оба клана
+    for member_id in klan['members']:
+        try:
+            message.reply(text, peer_id=int(member_id))
+        except:
+            pass
+
+    for member_id in opponent_klan['members']:
+        try:
+            message.reply(text, peer_id=int(member_id))
+        except:
+            pass
+
+    message.reply(f"✅ Битва кланов создана! Ожидаем участников...")
+
+def leave_klan(message):
+    """Покинуть клан"""
+    klan_id = get_user_klan(message.from_id)
+
+    if not klan_id:
+        return message.reply("❌ Вы не состоите в клане!")
+
+    klan = klans_data['klans'][klan_id]
+    user_id_str = str(message.from_id)
+
+    # Проверяем, не лидер ли
+    if klan['members'][user_id_str]['role'] == 'leader':
+        return message.reply("❌ Лидер не может покинуть клан! Сначала передайте лидерство или удалите клан.")
+
+    # Покидаем клан
+    username = klan['members'][user_id_str]['username']
+    del klan['members'][user_id_str]
+
+    # Если в клане не осталось участников, удаляем его
+    if not klan['members']:
+        del klans_data['klans'][klan_id]
+
+    save_klans_data()
+
+    message.reply(f"✅ Вы покинули клан {klan['name']} [{klan['tag']}]!")
+
+def delete_klan(message):
+    """Удалить клан"""
+    klan_id = get_user_klan(message.from_id)
+
+    if not klan_id:
+        return message.reply("❌ Вы не состоите в клане!")
+
+    klan = klans_data['klans'][klan_id]
+    user_id_str = str(message.from_id)
+
+    # Проверяем права
+    if klan['members'][user_id_str]['role'] != 'leader':
+        return message.reply("❌ Только лидер может удалить клан!")
+
+    # Удаляем клан
+    klan_name = klan['name']
+    klan_tag = klan['tag']
+
+    # Уведомляем всех участников
+    for member_id in klan['members']:
+        if int(member_id) != message.from_id:
+            try:
+                message.reply(f"❌ Клан {klan_name} [{klan_tag}] был удален лидером!",
+                            peer_id=int(member_id))
+            except:
+                pass
+
+    del klans_data['klans'][klan_id]
+    save_klans_data()
+
+    message.reply(f"✅ Клан {klan_name} [{klan_tag}] удален!")
+def show_klan_members(message):
+    """Показать участников клана"""
+    klan_id = get_user_klan(message.from_id)
+
+    if not klan_id:
+        return message.reply("❌ Вы не состоите в клане!")
+
+    klan = klans_data['klans'][klan_id]
+
+    text = f"👥 УЧАСТНИКИ КЛАНА {klan['name']} [{klan['tag']}]\n\n"
+
+    leaders = []
+    members = []
+
+    for member_id, member_data in klan['members'].items():
+        join_date = datetime.datetime.fromisoformat(member_data['join_date'])
+        days_in_klan = (datetime.datetime.now() - join_date).days
+
+        member_info = f"{member_data['username']} ({days_in_klan}д.)"
+
+        if member_data['role'] == 'leader':
+            leaders.append("👑 " + member_info)
+        else:
+            members.append("👤 " + member_info)
+
+    text += "👑 Лидеры:\n" + "\n".join(leaders) + "\n\n"
+    text += "👤 Участники:\n" + "\n".join(members)
+
+    message.reply(text)
+
+def show_klan_top(message):
+    """Показать топ кланов"""
+    # Сортируем кланы по опыту
+    sorted_klans = sorted(klans_data['klans'].values(),
+                         key=lambda x: x['exp'], reverse=True)[:10]
+
+    text = "🏆 ТОП КЛАНОВ\n\n"
+
+    for i, klan in enumerate(sorted_klans, 1):
+        if i == 1:
+            place = "🥇"
+        elif i == 2:
+            place = "🥈"
+        elif i == 3:
+            place = "🥉"
+        else:
+            place = f"{i}."
+
+        win_rate = klan['wins'] / (klan['wins'] + klan['losses']) * 100 if (klan['wins'] + klan['losses']) > 0 else 0
+
+        text += f"{place} {klan['name']} [{klan['tag']}]\n"
+        text += f"   ⭐ Ур. {klan['level']} | 📊 {format_number(klan['exp'])} опыта\n"
+        text += f"   ⚔️ {klan['wins']}-{klan['losses']} ({win_rate:.1f}% побед)\n"
+        text += f"   👥 {len(klan['members'])}/15 участников\n\n"
+
+    message.reply(text)
+
+def create_race_visualization(race):
+    """Создать визуализацию гонки с цветами машин"""
+    players_with_colors = race.get_players_with_colors()
+    track_length = 20  # Длина трека в символах
+
+    visualization = "🏁 ГОНОЧНЫЙ ТРЕК 🏁\n\n"
+
+    # Сортируем игроков по прогрессу
+    sorted_players = sorted(players_with_colors.items(),
+                          key=lambda x: x[1]['progress'],
+                          reverse=True)
+
+    for i, (user_id, player) in enumerate(sorted_players):
+        progress_percent = min(100, int(player['progress'] / race.distance * 100))
+        car_position = min(track_length - 1, int((player['progress'] / race.distance) * track_length))
+
+        # Создаем трек с машиной
+        track = "─" * track_length
+        if car_position < track_length:
+            # Используем эмодзи машины с учетом цвета (в тексте цвет не отображается, но можно использовать для веб-версии)
+            track = track[:car_position] + "🚗" + track[car_position+1:]
+
+        status = "🏁 ФИНИШ!" if player['finished'] else f"{progress_percent}%"
+
+        visualization += f"{i+1}. {player['user_name']}\n"
+        visualization += f"   {track}\n"
+        visualization += f"   {status}\n\n"
+
+    return visualization
+def unknow_command(message):
+    if message.is_private:
+        show_menu(message)
+
+# Добавляем в myfunctions.py глобальные переменные
+pvp_waiting_players = {}  # {user_id: player_data}
+pvp_active_races = {}     # {race_id: PvPRace object}
+
+# Добавляем новые функции в myfunctions.py
 
 def start_pvp_race(message):
     """Начать поиск PvP гонки"""
+    user_data = load_data(USERS_DB_FILE)
     user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
     
-    if not user:
+    if user_id not in user_data.get('users', {}):
         return message.reply("❌ Сначала зарегистрируйтесь в боте!")
+    
+    user = user_data['users'][user_id]
     
     if not user.get('cars'):
         return message.reply("❌ У вас нет машин! Сначала купите машину.")
@@ -1085,7 +2042,7 @@ def start_pvp_race(message):
     
     # Добавляем в очередь ожидания
     pvp_waiting_players[message.from_id] = {
-        'user_name': user.get('username', 'Игрок'),
+        'user_name': user['username'],
         'car_data': car_data,
         'search_start_time': time.time(),
         'message': message
@@ -1146,7 +2103,7 @@ def find_pvp_opponent(player_id):
                 threading.Thread(target=run_pvp_race, args=(race_id,)).start()
                 return
     
-        time.sleep(2)
+        time.sleep(2)  # проверяем каждые 2 секунды
     
     # Если не нашли противника
     if player_id in pvp_waiting_players:
@@ -1158,305 +2115,144 @@ def find_pvp_opponent(player_id):
 
 def notify_players_race_start(pvp_race, image_path):
     """Уведомить игроков о начале гонки"""
-    # Для PvP гонок используем стандартный механизм
-    pass
+    players_data = pvp_race.get_players_data()
+    
+    if players_data and image_path:
+        # Загружаем изображение в VK
+        upload = vk_api.VkUpload(pvp_race.vk)
+        photo = upload.photo_messages(image_path)
+        
+        if photo:
+            attachment = f"photo{photo[0]['owner_id']}_{photo[0]['id']}"
+            
+            # Отправляем обоим игрокам
+            for player_key in ['player1', 'player2']:
+                player_id = players_data[player_key]['id']
+                try:
+                    pvp_race.vk.messages.send(
+                        user_id=player_id,
+                        message="🏁 PvP ГОНКА НАЧАЛАСЬ! 🏁",
+                        attachment=attachment,
+                        random_id=0
+                    )
+                except:
+                    pass
 
 def run_pvp_race(race_id):
     """Запустить PvP гонку"""
-    # Для PvP гонок используем стандартный механизм
-    pass
+    if race_id not in pvp_active_races:
+        return
+        
+    pvp_race = pvp_active_races[race_id]
+    start_time = time.time()
+    
+    # Обновляем гонку каждую секунду
+    while pvp_race.status == "in_progress" and (time.time() - start_time) < 60:
+        race_finished = pvp_race.update_race()
+        
+        # Отправляем обновление прогресса каждые 3 секунды
+        if int(time.time() - start_time) % 3 == 0 or race_finished:
+            progress_text = pvp_race.get_race_progress()
+            
+            # Отправляем обоим игрокам
+            for player_id in [pvp_race.player1_id, pvp_race.player2_id]:
+                try:
+                    pvp_race.vk.messages.send(
+                        user_id=player_id,
+                        message=progress_text,
+                        random_id=0
+                    )
+                except:
+                    pass
+        
+        if race_finished:
+            break
+            
+        time.sleep(1)
+    
+    # Завершаем гонку
+    if pvp_race.status == "finished":
+        award_pvp_players(pvp_race)
+        
+        # Создаем и отправляем изображение победителя
+        image_generator = RaceImageGenerator()
+        winner_data = pvp_race.players[pvp_race.winner]
+        image_path = image_generator.create_race_finish_image(
+            pvp_race.winner, winner_data['car_name']
+        )
+        
+        # Уведомляем игроков о результате
+        notify_players_race_finish(pvp_race, image_path)
+    
+    # Удаляем гонку
+    if race_id in pvp_active_races:
+        del pvp_active_races[race_id]
+
+def notify_players_race_finish(pvp_race, image_path):
+    """Уведомить игроков о завершении гонки"""
+    winner_name = pvp_race.players[pvp_race.winner]['user_name']
+    loser_id = pvp_race.player1_id if pvp_race.winner == pvp_race.player2_id else pvp_race.player2_id
+    
+    attachment = None
+    if image_path:
+        # Загружаем изображение в VK
+        upload = vk_api.VkUpload(pvp_race.vk)
+        photo = upload.photo_messages(image_path)
+        if photo:
+            attachment = f"photo{photo[0]['owner_id']}_{photo[0]['id']}"
+    
+    # Сообщение о результате
+    result_text = f"🏁 PvP ГОНКА ЗАВЕРШЕНА! 🏁\n\n🏆 ПОБЕДИТЕЛЬ: {winner_name}"
+    
+    # Отправляем обоим игрокам
+    for player_id in [pvp_race.player1_id, pvp_race.player2_id]:
+        try:
+            if attachment:
+                pvp_race.vk.messages.send(
+                    user_id=player_id,
+                    message=result_text,
+                    attachment=attachment,
+                    random_id=0
+                )
+            else:
+                pvp_race.vk.messages.send(
+                    user_id=player_id,
+                    message=result_text,
+                    random_id=0
+                )
+        except:
+            pass
 
 def award_pvp_players(pvp_race):
     """Выдать награды за PvP гонку"""
-    # Для PvP гонок используем стандартный механизм
-    pass
-
-# ==================== КОМАНДЫ БОТА ====================
-
-def show_commands(message):
-    """Показать команды"""
-    user_id = str(message.from_id)
-    user = get_user_by_id(user_id)
+    user_data = load_data(USERS_DB_FILE)
     
-    if not user:
-        return message.reply("❌ У вас нет аккаунта в боте! Напишите 'Начать' для регистрации.")
-
-    text = f"📚 Привет, {message.get_mention(message.from_id)}, вот все команды бота:\n\n"
-    text += f"🏎️ ОСНОВНЫЕ КОМАНДЫ:\n"
-    text += f"- Меню - главное меню бота\n"
-    text += f"- Помощь - показать команды\n"
-    text += f"- Гонка - меню гонок\n"
-    text += f"- Поддержка - поддержка бота\n\n"
-
-    text += f"🚗 АВТОМОБИЛИ:\n"
-    text += f"- Гараж - ваши машины\n"
-    text += f"- Автосалон - купить машину\n"
-    text += f"- Техцентр - улучшить машину\n\n"
-
-    text += f"🎮 В ЧАТАХ:\n"
-    text += f"- Гонка - создать/присоединиться к гонке\n"
-    text += f"- Старт - начать гонку\n"
-    text += f"- Драг [@игрок] - вызвать на драг-рейсинг\n\n"
-
-    text += f"🙂 Команды будут добавляться, следите за новостями!"
-    message.reply(text)
-
-def welcome_message(message):
-    """Приветственное сообщение"""
-    text = "🏎️ Добро пожаловать в Гонки Бот!\n\n"
-    text += "Я помогу вам организовать захватывающие гоночные соревнования!\n\n"
-    text += "📋 Основные команды:\n"
-    text += "• 'Гонка' - создать/присоединиться к гонке\n"
-    text += "• 'Меню' - показать главное меню\n"
-    text += "• 'Помощь' - список всех команд\n"
-    text += "• 'Драг @игрок' - вызвать на драг-рейсинг\n\n"
-    text += "🚀 Чтобы начать, напишите 'Гонка' и создайте свою первую гонку!"
-
-    message.reply(text)
-
-def admin_add_premium(message, chat_id):
-    """Выдать Premium чату"""
-    chat_data = get_chat_data(str(chat_id))
-    if not chat_data:
-        return message.reply("⚠️ Этого чата нет в базе данных!")
+    # Награда победителю
+    if str(pvp_race.winner) in user_data.get('users', {}):
+        winner = user_data['users'][str(pvp_race.winner)]
+        winner['money'] += 800
+        winner['exp'] += 40
+        
+        # Проверка повышения уровня
+        levels_gained = check_level_up(winner)
+        if levels_gained > 0:
+            winner['money'] += levels_gained * LEVEL_REWARD
     
-    if chat_data.get('premium', False):
-        return message.reply("⚠️ У этого чата уже есть Premium")
+    # Награда проигравшему
+    loser_id = pvp_race.player1_id if pvp_race.winner == pvp_race.player2_id else pvp_race.player2_id
+    if str(loser_id) in user_data.get('users', {}):
+        loser = user_data['users'][str(loser_id)]
+        loser['money'] += 300
+        loser['exp'] += 15
+        check_level_up(loser)
     
-    success = update_chat_data(str(chat_id), {'premium': True})
-    
-    if success:
-        message.reply("✅ Premium успешно выдан чату!")
-    else:
-        message.reply("❌ Ошибка при выдаче Premium")
+    save_data(user_data, USERS_DB_FILE)
 
-def unknow_command(message):
-    """Обработка неизвестной команды"""
+# Добавляем команду в обработчик сообщений
+def handle_pvp_command(message):
+    """Обработка команды PvP гонки"""
     if message.is_private:
-        show_menu(message)
-
-# ==================== ФУНКЦИИ КЛАНОВ ====================
-
-def get_user_klan(user_id):
-    """Получить ID клана пользователя"""
-    klans = get_klans_data()
-    user_id_str = str(user_id)
-    
-    for klan_id, klan_data in klans.items():
-        if 'members' in klan_data and user_id_str in klan_data['members']:
-            return klan_id
-    return None
-
-def show_klan_menu(message):
-    """Показать меню кланов"""
-    text = "🏆 СИСТЕМА КЛАНОВ\n\n"
-    text += "Объединяйтесь с друзьями и соревнуйтесь с другими кланами!\n\n"
-    text += "📋 Команды кланов:\n"
-    text += "• клан создать [название] [тег] - создать клан\n"
-    text += "• клан инфо - информация о вашем клане\n"
-    text += "• клан приглос [@игрок] - пригласить в клан\n"
-    text += "• клан кик [@игрок] - исключить из клана\n"
-    text += "• клан гонка - начать битву кланов\n"
-    text += "• клан выйти - покинуть клан\n"
-    text += "• клан удалить - удалить клан (только лидер)\n\n"
-    text += "👥 Максимум участников: 15\n"
-    text += "⚔️ Битвы: гонка 5 на 5"
-
-    user_klan_id = get_user_klan(message.from_id)
-    if user_klan_id:
-        klan_info = get_klan(user_klan_id)
-        if klan_info:
-            text += f"\n\n🏁 Ваш клан: {klan_info.get('name', 'Без названия')} [{klan_info.get('tag', 'XXX')}]"
-
-    keyboard = VkKeyboard(inline=True)
-
-    if not user_klan_id:
-        keyboard.add_button("🏆 Создать клан", VkKeyboardColor.POSITIVE,
-                          payload={'cmd': 'klan_create_menu'})
-        keyboard.add_line()
+        return start_pvp_race(message)
     else:
-        keyboard.add_button("📊 Инфо о клане", VkKeyboardColor.PRIMARY,
-                          payload={'cmd': 'klan_info'})
-        keyboard.add_button("👥 Участники", VkKeyboardColor.PRIMARY,
-                          payload={'cmd': 'klan_members'})
-        keyboard.add_line()
-        keyboard.add_button("⚔️ Битва кланов", VkKeyboardColor.NEGATIVE,
-                          payload={'cmd': 'klan_battle'})
+        return message.reply("❌ PvP гонки доступны только в личных сообщениях с ботом!")
 
-    keyboard.add_button("🏆 Топ кланов", VkKeyboardColor.SECONDARY,
-                      payload={'cmd': 'klan_top'})
-
-    message.reply(text, keyboard=keyboard.get_keyboard())
-
-def handle_klan_command(message, args=None):
-    """Обработка команд кланов"""
-    if not args:
-        return show_klan_menu(message)
-
-    command = args[0].lower()
-
-    if command == "создать":
-        create_klan(message, args[1:])
-    elif command == "удалить":
-        delete_klan(message)
-    elif command == "приглос":
-        invite_to_klan(message, args[1:])
-    elif command == "кик":
-        kick_from_klan(message, args[1:])
-    elif command == "гонка":
-        start_klan_battle(message)
-    elif command == "инфо":
-        show_klan_info(message)
-    elif command == "выйти":
-        leave_klan(message)
-    elif command == "принять":
-        accept_klan_invite(message, args[1:])
-    elif command == "отклонить":
-        message.reply("❌ Приглашение отклонено.")
-    else:
-        show_klan_menu(message)
-
-def create_klan(message, args):
-    """Создание клана"""
-    user_id = str(message.from_id)
-
-    # Проверяем, не состоит ли уже в клане
-    if get_user_klan(message.from_id):
-        return message.reply("❌ Вы уже состоите в клане!")
-
-    # Проверяем аргументы
-    if len(args) < 2:
-        return message.reply("❌ Использование: клан создать [название] [тег]\nПример: клан создать ГонщикиПро GP")
-
-    name = args[0]
-    tag = args[1].upper()
-
-    # Проверяем длину названия и тега
-    if len(name) > 20:
-        return message.reply("❌ Название клана не должно превышать 20 символов!")
-
-    if len(tag) > 5:
-        return message.reply("❌ Тег клана не должен превышать 5 символов!")
-
-    # Проверяем уникальность названия и тега
-    klans = get_klans_data()
-    for klan_id, klan in klans.items():
-        if klan.get('name', '').lower() == name.lower():
-            return message.reply("❌ Клан с таким названием уже существует!")
-        if klan.get('tag', '').upper() == tag.upper():
-            return message.reply("❌ Клан с таким тегом уже существует!")
-
-    # Получаем следующий ID
-    klan_id = str(len(klans) + 1)
-    
-    user = get_user_by_id(user_id)
-    username = user.get('username', 'Игрок') if user else 'Игрок'
-
-    klan_data = {
-        "name": name,
-        "tag": tag,
-        "creator_id": int(user_id),
-        "members": {
-            user_id: {
-                "username": username,
-                "role": "leader",
-                "join_date": datetime.datetime.now().isoformat()
-            }
-        },
-        "created_date": datetime.datetime.now().isoformat(),
-        "level": 1,
-        "exp": 0,
-        "wins": 0,
-        "losses": 0,
-        "description": "Новый гоночный клан"
-    }
-
-    success = save_klan_data(klan_id, klan_data)
-    
-    if success:
-        message.reply(f"✅ Клан '{name}' [{tag}] успешно создан!\nИспользуйте 'клан приглос [@игрок]' чтобы пригласить друзей.")
-    else:
-        message.reply("❌ Ошибка при создании клана.")
-
-# Остальные функции кланов нужно адаптировать аналогично
-# Но из-за ограничения длины оставляю их без изменений (они будут работать с функциями выше)
-
-def show_klan_info(message):
-    """Показать информацию о клане"""
-    klan_id = get_user_klan(message.from_id)
-
-    if not klan_id:
-        return message.reply("❌ Вы не состоите в клане!")
-
-    klan = get_klan(klan_id)
-    if not klan:
-        return message.reply("❌ Клан не найден!")
-
-    text = f"🏆 ИНФОРМАЦИЯ О КЛАНЕ\n\n"
-    text += f"🏁 Название: {klan.get('name', 'Без названия')} [{klan.get('tag', 'XXX')}]\n"
-    text += f"⭐ Уровень: {klan.get('level', 1)}\n"
-    text += f"📊 Опыт: {format_number(klan.get('exp', 0))}\n"
-    text += f"👥 Участников: {len(klan.get('members', {}))}/15\n"
-    text += f"⚔️ Побед/Поражений: {klan.get('wins', 0)}/{klan.get('losses', 0)}\n"
-    text += f"📝 Описание: {klan.get('description', 'Нет описания')}\n\n"
-
-    # Сортируем участников по роли
-    leaders = []
-    members = []
-
-    for member_id, member_data in klan.get('members', {}).items():
-        if member_data.get('role') == 'leader':
-            leaders.append(member_data.get('username', 'Игрок'))
-        else:
-            members.append(member_data.get('username', 'Игрок'))
-
-    text += "👑 Лидеры:\n"
-    for leader in leaders:
-        text += f"• {leader}\n"
-
-    if members:
-        text += "\n👥 Участники:\n"
-        for member in members:
-            text += f"• {member}\n"
-
-    keyboard = VkKeyboard(inline=True)
-    keyboard.add_button("👥 Участники", VkKeyboardColor.PRIMARY, payload={'cmd': 'klan_members'})
-    keyboard.add_button("⚔️ Битва", VkKeyboardColor.NEGATIVE, payload={'cmd': 'klan_battle'})
-    keyboard.add_line()
-    keyboard.add_button("📤 Пригласить", VkKeyboardColor.POSITIVE, payload={'cmd': 'klan_invite_menu'})
-
-    message.reply(text, keyboard=keyboard.get_keyboard())
-
-# Остальные функции кланов (invite_to_klan, kick_from_klan и т.д.) 
-# нужно адаптировать аналогично, но они слишком длинные для одного ответа
-
-# ==================== ВИЗУАЛИЗАЦИЯ ГОНОК ====================
-
-def create_race_visualization(race):
-    """Создать визуализацию гонки с цветами машин"""
-    players_with_colors = race.get_players_with_colors()
-    track_length = 20  # Длина трека в символах
-
-    visualization = "🏁 ГОНОЧНЫЙ ТРЕК 🏁\n\n"
-
-    # Сортируем игроков по прогрессу
-    sorted_players = sorted(players_with_colors.items(),
-                          key=lambda x: x[1]['progress'],
-                          reverse=True)
-
-    for i, (user_id, player) in enumerate(sorted_players):
-        progress_percent = min(100, int(player['progress'] / race.distance * 100))
-        car_position = min(track_length - 1, int((player['progress'] / race.distance) * track_length))
-
-        # Создаем трек с машиной
-        track = "─" * track_length
-        if car_position < track_length:
-            track = track[:car_position] + "🚗" + track[car_position+1:]
-
-        status = "🏁 ФИНИШ!" if player['finished'] else f"{progress_percent}%"
-
-        visualization += f"{i+1}. {player['user_name']}\n"
-        visualization += f"   {track}\n"
-        visualization += f"   {status}\n\n"
-
-    return visualization
