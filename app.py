@@ -13,9 +13,24 @@ from admin import handle_admin_command
 from myfunctions import *
 from myclass import *
 from config import BOT_TOKEN as token, admins_ids, GROUP_ID
-
+from datetime import timedelta
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.urandom(24)
+# КРИТИЧЕСКИ ВАЖНЫЕ НАСТРОЙКИ:
+app.config.update(
+    SECRET_KEY=os.environ.get('SECRET_KEY') or 'garage-site-2024-secret-key-min-32-chars!!',
+    SESSION_TYPE='filesystem',  # Или 'redis' для продакшена
+    SESSION_PERMANENT=True,
+    PERMANENT_SESSION_LIFETIME=timedelta(days=7),
+    SESSION_COOKIE_NAME='garage_auth',
+    SESSION_COOKIE_SECURE=False,  # True для HTTPS
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_REFRESH_EACH_REQUEST=False
+)
+
+# Импортируем Session
+from flask_session import Session
+Session(app)
 
 # =============================================================================
 # ИНИЦИАЛИЗАЦИЯ VK БОТА (LONGPOLL)
@@ -37,53 +52,7 @@ import datetime
 # АВТОМАТИЧЕСКИЙ ПЕРЕЗАПУСК ДЛЯ CLOUD SHELL
 # =============================================================================
 
-class AutoRestart:
-    def __init__(self, max_hours=45):
-        """
-        max_hours: через сколько часов перезапускаться
-        45 часов (вместо 50) для безопасности
-        """
-        self.max_hours = max_hours
-        self.start_time = time.time()
-        self.restart_count = 0
-        
-    def start(self):
-        """Запуск автоматического перезапуска"""
-        def restart_thread():
-            while True:
-                # Текущее время работы
-                current_time = time.time()
-                hours_running = (current_time - self.start_time) / 3600
-                
-                # Каждые 30 минут пишем в лог
-                if int(time.time()) % 1800 == 0:
-                    print(f"[{datetime.datetime.now()}] Бот работает {hours_running:.1f} часов")
-                
-                # Если работали больше max_hours - перезапускаемся
-                if hours_running > self.max_hours:
-                    print(f"⏰ Время сессии истекает! ({hours_running:.1f} часов)")
-                    print("🔄 Начинаю автоматический перезапуск...")
-                    self.perform_restart()
-                
-                # Проверяем каждую минуту
-                time.sleep(60)
-        
-        # Запускаем в отдельном потоке
-        Thread(target=restart_thread, daemon=True).start()
-        print(f"✅ Автоперезапуск настроен на каждые {self.max_hours} часов")
-    
-    def perform_restart(self):
-        """Выполнить перезапуск"""
-        # Сохраняем важные данные перед перезапуском
-        print("💾 Сохраняю данные...")
-        time.sleep(2)
-        
-        # Перезапускаем процесс
-        print("🚀 Перезапускаю бота...")
-        os.execv(sys.executable, [sys.executable] + sys.argv)
 
-# Создаем глобальный объект авто-перезапуска
-auto_restart = AutoRestart(max_hours=30)  # 30 часов
 def init_bot():
     """Инициализировать бота"""
     global longpoll, vk_session, vk
@@ -180,17 +149,17 @@ def handle_vk_message(event):
 def send_welcome_message(event):
     """Отправка приветственного сообщения при добавлении в чат"""
     try:
-        chat_id = event.obj.message['peer_id']
+        chat_id = event.obj.message['chat_id']
         
         # Получаем информацию о чате
-        chat_info = vk.messages.getConversationsById(peer_ids=chat_id)
+        try:
+            chat_info = vk.messages.getChat(chat_id=chat_id)['title']
+        except:
+            chat_info = "Новый чат"
         
-        if chat_info and 'items' in chat_info and chat_info['items']:
-            chat_name = chat_info['items'][0].get('chat_settings', {}).get('title', 'этот чат')
-        else:
-            chat_name = 'этот чат'
         
-        welcome_text = """*all 🏎️ ДОБРО ПОЖАЛОВАТЬ В ГОНОЧНЫЙ БОТ!
+        
+        welcome_text = """@all 🏎️ ДОБРО ПОЖАЛОВАТЬ В ГОНОЧНЫЙ БОТ!
 
 Приветствую всех участников чата! 🎉
 
@@ -225,14 +194,14 @@ P.S. Для помощи напишите "Помощь"."""
         
         # Отправляем сообщение
         vk.messages.send(
-            peer_id=chat_id,
+            peer_id=event.obj['peer_id'],
             message=welcome_text,
             keyboard=keyboard.get_keyboard(),
             random_id=0
         )
         
         # Регистрируем чат в базе данных
-        register_new_chat(chat_id, chat_name)
+        register_new_chat(chat_id, chat_info)
         
         print(f"✅ Бот добавлен в чат {chat_name} (ID: {chat_id})")
         
@@ -392,123 +361,9 @@ def save_car_color(user_id, car_id, color):
 # Хранилище для логинов на сайте
 database_login = {}
 
-# =============================================================================
-# ВСЕ ВАШИ РОУТЫ (ПОЛНОСТЬЮ СОХРАНЕНЫ)
-# =============================================================================
 
-@app.route('/vk_auth', methods=['POST'])
-def vk_auth():
-    """Обработка данных от VK ID"""
-    try:
-        data = request.json
-        access_token = data.get('access_token')
-        vk_user_id = data.get('user_id')
-        
-        if not access_token or not vk_user_id:
-            return jsonify({'success': False, 'error': 'Недостаточно данных'})
-        
-        print(f"[VK AUTH] Получен запрос от пользователя {vk_user_id}")
-        
-        # Проверяем токен через VK API
-        verify_url = 'https://api.vk.com/method/users.get'
-        params = {
-            'access_token': access_token,
-            'v': '5.199'
-        }
-        
-        response = requests.get(verify_url, params=params)
-        verify_data = response.json()
-        
-        if 'response' in verify_data:
-            # Токен валидный, получаем информацию о пользователе
-            user_info_url = 'https://api.vk.com/method/users.get'
-            user_params = {
-                'access_token': access_token,
-                'user_ids': vk_user_id,
-                'fields': 'first_name,last_name,photo_200',
-                'v': '5.199'
-            }
-            
-            user_response = requests.get(user_info_url, params=user_params)
-            user_data = user_response.json()
-            
-            if 'response' in user_data and user_data['response']:
-                user = user_data['response'][0]
-                username = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip()
-                
-                # Проверяем, есть ли пользователь в нашей базе
-                existing_user = get_user_by_id(vk_user_id)
-                
-                if not existing_user:
-                    # Создаем нового пользователя
-                    print(f"[VK AUTH] Создание нового пользователя {vk_user_id}")
-                    users_data = load_data(USERS_DB_FILE)
-                    
-                    new_user = {
-                        "username": username,
-                        "money": 1000,  # Стартовый баланс
-                        "exp": 0,
-                        "level": 1,
-                        "cars": {
-                            "1": {
-                                "name": "Lada Vesta",
-                                "hp": 106,
-                                "max_speed": 180,
-                                "tire_health": 100,
-                                "durability": 100,
-                                "bought_date": datetime.datetime.now().isoformat()
-                            }
-                        },
-                        "active_car": "1",
-                        "referral_code": f"ref_{vk_user_id}",
-                        "referred_by": None,
-                        "pistons": 0
-                    }
-                    
-                    users_data['users'][str(vk_user_id)] = new_user
-                    save_data(users_data, USERS_DB_FILE)
-                    
-                    print(f"[VK AUTH] Создан новый пользователь: {username} (ID: {vk_user_id})")
-                
-                # Авторизуем пользователя
-                session['user_id'] = vk_user_id
-                session['vk_token'] = access_token
-                session.permanent = True
-                
-                # Сохраняем в базе логинов для совместимости
-                database_login[str(vk_user_id)] = {
-                    'status': 'success',
-                    'timestamp': time.time(),
-                    'username': username
-                }
-                
-                return jsonify({
-                    'success': True,
-                    'user_id': vk_user_id,
-                    'username': username
-                })
-        
-        return jsonify({'success': False, 'error': 'Ошибка проверки токена'})
-        
-    except Exception as e:
-        print(f"[VK AUTH] Ошибка: {e}")
-        import traceback
-        print(f"Трассировка: {traceback.format_exc()}")
-        return jsonify({'success': False, 'error': str(e)})
 
-@app.route('/vk_auth_callback')
-def vk_auth_callback():
-    """Callback URL для VK ID (режим callback)"""
-    # В режиме callback VK ID уже обработал авторизацию через JS
-    # Перенаправляем пользователя обратно
-    return redirect(url_for('index'))
 
-@app.route('/vk_logout')
-def vk_logout():
-    """Выход из системы"""
-    session.clear()
-    flash('Вы успешно вышли из системы!', 'success')
-    return redirect(url_for('index'))
 
 # ДОБАВЬТЕ ЭТУ ФУНКЦИЮ В utility_processor ДЛЯ ПРОВЕРКИ VK ТОКЕНА:
 @app.context_processor
@@ -552,20 +407,86 @@ def index():
     user_data = None
     if user_id:
         user_data = get_user_by_id(user_id)
-    return render_template('index.html', user=user_data, user_id=user_id)
-
-@app.route('/login', methods=['GET'])
+    return render_template('index.html', user=user_data, user_id=user_id), 200
+    
+@app.route('/login', methods=['GET', 'POST'])
 def login():
-    """Страница входа через VK ID"""
-    # Если уже авторизован - на dashboard
-    if 'user_id' in session:
-        return redirect(url_for('dashboard'))
+    """Страница входа через форму с user_id и password"""
+    if request.method == "POST":
+        user_id = request.form.get('user_id', '').strip()
+        password = request.form.get('password', '').strip()
     
-    # Генерируем nonce для CSP (если нужно)
-    import secrets
-    csp_nonce = secrets.token_hex(16)
+        print(f"DEBUG: Получен POST: user_id={user_id}")
     
-    return render_template('login.html', csp_nonce=csp_nonce)
+        try:
+            db = load_data("users.json")
+    
+            if user_id and str(user_id) in db.get('users', {}):
+                user_data = db['users'][str(user_id)]
+    
+                if 'site' in user_data and 'password' in user_data['site']:
+                    if password == user_data['site']['password']:
+                        # СПЕЦИАЛЬНЫЙ СПОСОБ - принудительное сохранение
+                        session['user_id'] = user_id
+                        session['_fresh'] = True
+                        session['_id'] = hashlib.md5(user_id.encode()).hexdigest()
+    
+                        # КРИТИЧЕСКИ ВАЖНО!
+                        session.modified = True
+    
+                        # Сохраняем сессию вручную
+                        if hasattr(session, 'save'):
+                            session.save()
+    
+                        print(f"DEBUG: Сессия установлена: {dict(session)}")
+    
+                        # НЕМЕДЛЕННЫЙ редирект
+                        response = redirect(url_for('dashboard'))
+                        return response
+        except:
+    
+            flash('❌ Неверные данные', 'danger')
+    
+    return render_template('login.html')
+
+@app.route('/dashboard')
+def dashboard():
+    """Личный кабинет пользователя"""
+    print(f"DEBUG dashboard: session = {dict(session)}")
+    
+    # Проверяем user_id в сессии
+    user_id = session.get('user_id')
+    
+    if not user_id:
+        print(f"DEBUG: Нет user_id в сессии!")
+        # Попробуем получить из cookies как запасной вариант
+        user_id = request.cookies.get('user_id_direct')
+    
+        if not user_id:
+            flash('⚠️ Пожалуйста, войдите в систему', 'warning')
+            return redirect(url_for('login'))
+    
+    try:
+        db = load_data("users.json")
+    
+        if str(user_id) not in db.get('users', {}):
+            session.clear()
+            flash('⚠️ Пользователь не найден', 'danger')
+            return redirect(url_for('login'))
+    
+        user_data = db['users'][str(user_id)]
+    
+        return render_template('dashboard.html', 
+                             user=user_data,
+                             user_id=user_id,
+                              DONATE_PACKAGES=DONATE_PACKAGES)
+    
+    except Exception as e:
+        flash(f'⚠️ Ошибка: {str(e)}', 'danger')
+        return redirect(url_for('login'))
+
+
+
 import requests
 
 import base64
@@ -573,7 +494,29 @@ import hashlib
 import hmac
 CLIENT_SECRET = "xEbpCw780PwGn5PRw9jC"
 
+def keep_bot_alive():
+    """Функция для поддержания работы бота"""
+    while True:
+        try:
+            # Получаем URL нашего Replit
+            repl_slug = os.environ.get('REPL_SLUG', 'racebotvk')
+            repl_owner = os.environ.get('REPL_OWNER', 'bisekeevdenis6')
+            url = "https://racebotvk--bisekeevdenis6.replit.app/keepalive"
 
+            # Делаем запрос к специальному эндпоинту
+            response = requests.get(url, timeout=30)
+            print(f"[{time.strftime('%H:%M:%S')}] Keep-alive ping: {response.status_code}")
+        except Exception as e:
+            print(f"[{time.strftime('%H:%M:%S')}] Keep-alive error: {e}")
+
+        # Пинг каждые 4 минуты (чаще чем Replit засыпает)
+        time.sleep(240)
+
+# Добавьте в Flask новый маршрут:
+@app.route('/keepalive')
+def keepalive():
+    """Специальный эндпоинт для поддержания работы бота"""
+    return 'Bot is alive', 200
 
 def check_login_status():
     """API для проверки статуса логина"""
@@ -622,23 +565,11 @@ def auto_login():
         flash('Неверный или устаревший токен входа', 'error')
     
     return redirect(url_for('login'))
-@app.route('/dashboard')
-def dashboard():
-    user_id = session.get('user_id')
-    if not user_id:
-        flash('Сначала авторизуйтесь!', 'error')
-        return redirect(url_for('login'))
 
-    user_data = get_user_by_id(user_id)
-    if not user_data:
-        session.clear()
-        flash('Пользователь не найден!', 'error')
-        return redirect(url_for('login'))
-
-    return render_template('dashboard.html',
-                         user=user_data,
-                         packages=DONATE_PACKAGES)
-
+@app.route('/health')
+def health_check():
+    """Эндпоинт для проверки здоровья (Replit проверяет его)"""
+    return 'OK', 200
 @app.route('/garage')
 def garage():
     user_id = session.get('user_id')
@@ -1310,6 +1241,8 @@ def admin_logout():
 # ФУНКЦИИ ОБРАБОТКИ СООБЩЕНИЙ VK (из вашего кода)
 # =============================================================================
 
+
+
 def handle_message_event(message_data):
     """Обработка новых сообщений (скопировано из вашего кода)"""
     message = Message(message_data, vk)
@@ -1327,7 +1260,8 @@ def handle_message_event(message_data):
     if payload and 'cmd' in payload:
         handle_button_command(message, payload['cmd'], payload)
         return
-
+    if message.from_id in password_hot:
+        update_password(message)
     # Обработка текстовых команд
     if text in ["меню", "/start", "start", "начать"]:
         show_menu(message)
@@ -1344,6 +1278,8 @@ def handle_message_event(message_data):
     elif text in ['гонка', 'гонки', 'race']:
         if message.from_id != message.peer_id:
             show_races(message)
+    elif text == "сайт":
+        show_site(message)
     elif text in ["pvp", "пвп", "гонка пвп"]:
         handle_pvp_command(message)
     elif text in ["старт", "начать гонку"]:
@@ -1596,6 +1532,8 @@ def handle_button_command(message, cmd, payload):
     
     if cmd == 'garage':
         show_garage(message)
+    elif cmd == 'site_update':
+        handle_password_update(message)
     elif cmd == 'jobs_menu':
         show_jobs_menu(message)
     elif cmd == "show_commands":
@@ -1734,16 +1672,39 @@ def start_bot_thread():
     print("🤖 Бот VK запущен в отдельном потоке")
 
 if __name__ == '__main__':
-    # Инициализируем бота
-    
-    
-    # Запускаем бота в отдельном потоке
-    
+    import os
+    import threading
 
-    # Запускаем авто-перезапуск
-    
-    
-    # Запускаем Flask приложение
-    print("🌐 Веб-сайт запущен по адресу: http://localhost:7000")
-    print("📱 Бот VK работает через LongPoll")
-    
+    # СНАЧАЛА запускаем Flask сразу
+    port = int(os.environ.get("PORT", 5000))
+
+    # Запускаем Flask в отдельном потоке БЫСТРО
+    def run_flask():
+        print(f"🌐 Запуск веб-сервера на порту {port}...")
+        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+
+    # Ждём немного, чтобы порт точно открылся
+    import time
+    time.sleep(2)
+
+    # ПОТОМ инициализируем бота (это может занять время)
+    print("🤖 Инициализация VK бота...")
+    if init_bot():
+        start_bot_thread()
+        
+        print("✅ Бот VK запущен")
+    else:
+        print("⚠️ Бот VK не запущен, но веб-сайт работает")
+        
+    # Запускаем keep-alive в отдельном потоке
+    keepalive_thread = threading.Thread(target=keep_bot_alive, daemon=True)
+    keepalive_thread.start()
+    # Держим основной поток активным
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("👋 Завершение работы")
