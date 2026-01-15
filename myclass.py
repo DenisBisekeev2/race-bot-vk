@@ -704,4 +704,13 @@ class PvPRace:
 def format_number(number):
     """Красивый вывод чисел"""
     return f"{number:,}".replace(",", " ")
+def load_data(data):
+    try:
+        with open(data, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return 
 
+def save_data(data, data_name):
+    with open(data_name, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
