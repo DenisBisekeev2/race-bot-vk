@@ -60,29 +60,7 @@ longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 print("✅ VK бот инициализирован (LongPoll)")
         
 
-def run_bot():
-    """Запустить бота в отдельном потоке"""
-    print("🚀 Запуск бота VK...")
-    
-    while True:
-        try:
-            if not longpoll:
-                if not init_bot():
-                    time.sleep(10)
-                    continue
-            
-            print("📱 Бот ожидает сообщения...")
-            
-            for event in longpoll.listen():
-                if event.type == VkBotEventType.MESSAGE_NEW:
-                    handle_vk_message(event)
-                elif event.type == VkBotEventType.MESSAGE_EVENT:
-                    handle_vk_callback(event)
-                    
-        except Exception as e:
-            print(f"❌ Ошибка в боте: {e}")
-            time.sleep(5)
-            init_bot()
+
 
 def handle_vk_message(event):
     """Обработка сообщений VK"""
@@ -1680,13 +1658,17 @@ if __name__ == '__main__':
 
     # ПОТОМ инициализируем бота (это может занять время)
     print("🤖 Инициализация VK бота...")
-    
-    
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
     print("🤖 Бот VK запущен в отдельном потоке")
     
     print("✅ Бот VK запущен")
+    
+    for event in longpoll.listen():
+        if event.type == VkBotEventType.MESSAGE_NEW:
+            handle_vk_message(event)
+        elif event.type == VkBotEventType.MESSAGE_EVENT:
+            handle_vk_callback(event)
+            
+    
     
         
    
