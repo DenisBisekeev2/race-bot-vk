@@ -36,9 +36,6 @@ Session(app)
 # ИНИЦИАЛИЗАЦИЯ VK БОТА (LONGPOLL)
 # =============================================================================
 
-# Глобальные переменные для бота
-vk_session = vk_api.VkApi(token=token)
-vk = vk_session.get_api()
 longpoll = None
 bot_thread = None
 import os
@@ -48,9 +45,6 @@ import signal
 from threading import Thread
 import datetime
 
-# =============================================================================
-# АВТОМАТИЧЕСКИЙ ПЕРЕЗАПУСК ДЛЯ CLOUD SHELL
-# =============================================================================
 
 
 
@@ -60,7 +54,33 @@ longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 print("✅ VK бот инициализирован (LongPoll)")
         
 
-
+def run_bot():
+    """Запустить бота в отдельном потоке"""
+    print("🚀 Запуск бота VK...")
+    
+    try:
+        if not longpoll:
+            if not init_bot():
+                print("❌ Не удалось инициализировать бота")
+                return
+        
+        print("📱 Бот ожидает сообщения...")
+        
+        while True:
+            try:
+                for event in longpoll.listen():
+                    if event.type == VkBotEventType.MESSAGE_NEW:
+                        handle_vk_message(event)
+                    elif event.type == VkBotEventType.MESSAGE_EVENT:
+                        handle_vk_callback(event)
+            except Exception as e:
+                print(f"❌ Ошибка в боте: {e}")
+                time.sleep(5)
+                
+    except Exception as e:
+        print(f"❌ Критическая ошибка бота: {e}")
+        import traceback
+        traceback.print_exc()
 
 def handle_vk_message(event):
     """Обработка сообщений VK"""
@@ -1641,40 +1661,31 @@ def handle_backup_command(message):
 
 if __name__ == '__main__':
     import os
-    import threading
-
-    # СНАЧАЛА запускаем Flask сразу
     port = int(os.environ.get("PORT", 5000))
-
-    # Запускаем Flask в отдельном потоке БЫСТРО
-    def run_flask():
-        print(f"🌐 Запуск веб-сервера на порту {port}...")
-        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
-
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-
     
-
-    # ПОТОМ инициализируем бота (это может занять время)
     print("🤖 Инициализация VK бота...")
-    print("🤖 Бот VK запущен в отдельном потоке")
     
-    print("✅ Бот VK запущен")
-    
-    for event in longpoll.listen():
-        if event.type == VkBotEventType.MESSAGE_NEW:
-            handle_vk_message(event)
-        elif event.type == VkBotEventType.MESSAGE_EVENT:
-            handle_vk_callback(event)
-            
-    
-    
-        
-   
-    # Держим основной поток активным
+    # Пытаемся инициализировать бота
+    bot_started = False
     try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("👋 Завершение работы")
+        if init_bot():
+            # Запускаем бота в отдельном потоке
+            bot_thread = threading.Thread(target=run_bot, daemon=True)
+            bot_thread.start()
+            bot_started = True
+            print("✅ Бот VK запущен в отдельном потоке")
+    except Exception as e:
+        print(f"❌ Ошибка запуска бота: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    print(f"🌐 Запуск веб-сервера на порту {port}...")
+    
+    # Запускаем Flask синхронно
+    app.run(
+        host='0.0.0.0', 
+        port=port, 
+        debug=False, 
+        use_reloader=False,
+        threaded=True
+    )
