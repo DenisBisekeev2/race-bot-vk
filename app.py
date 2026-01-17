@@ -72,7 +72,7 @@ def vk_webhook():
                 message_data['payload'] = data['object']['message']['payload']
             
             # Запускаем обработку в отдельном потоке
-            threading.Thread(target=process_vk_message, args=(message_data,)).start()
+            process_vk_message(message_data)
             
             return jsonify({'response': 'ok'})
         
