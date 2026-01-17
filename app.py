@@ -78,6 +78,8 @@ def vk_webhook():
         
         elif data.get('type') == 'message_event':
             # Обработка callback кнопок
+            if event['object']['text'] == "пинг":
+                return vk.messages.send(data['object']['peer_id'], "Понг!", random_id=0)
             event_data = {
                 'user_id': data['object']['user_id'],
                 'peer_id': data['object']['peer_id'],
