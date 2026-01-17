@@ -1,7 +1,6 @@
 from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session
 import vk_api
 from vk_api.keyboard import VkKeyboard, VkKeyboardColor
-from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 import json
 import os
 import time
@@ -23,8 +22,6 @@ app.secret_key = os.environ.get('SECRET_KEY', 'garage-site-2024-secret-key-min-3
 
 vk_session = vk_api.VkApi(token=token)
 vk = vk_session.get_api()
-longpoll = None
-bot_thread = None
 
 YOOMONEY_RECEIVER = "4100119211392665"
 YOOMONEY_SECRET = "23DF37D7EBE0F6DE798D0777123EBF2D6812B95852784C60B4C7091A7A6B69EB"
@@ -42,6 +39,163 @@ CAR_COLORS = ["#FF0000", "#00FF00", "#0000FF", "#FFFF00", "#FF00FF", "#00FFFF",
               "#808080", "#FFD700", "#008000", "#000080"]
 
 database_login = {}
+
+# =============================================================================
+# WEBHOOK РОУТЫ ДЛЯ VK БОТА
+# =============================================================================
+
+@app.route('/vk-webhook', methods=['POST'])
+def vk_webhook():
+    """Основной вебхук для VK API"""
+    try:
+        data = request.json
+        
+        if not data:
+            return jsonify({'response': 'error', 'message': 'No JSON data'}), 400
+        
+        # Проверка типа события
+        if data.get('type') == 'confirmation':
+            # Возвращаем строку подтверждения для настройки вебхука
+            return "9bb1bfa1"
+        
+        elif data.get('type') == 'message_new':
+            # Обработка нового сообщения
+            message_data = {
+                'from_id': data['object']['message']['from_id'],
+                'peer_id': data['object']['message']['peer_id'],
+                'text': data['object']['message']['text'],
+                'conversation_message_id': data['object']['message'].get('conversation_message_id'),
+                'id': data['object']['message'].get('id'),
+            }
+            
+            if 'payload' in data['object']['message'] and data['object']['message']['payload']:
+                message_data['payload'] = data['object']['message']['payload']
+            
+            # Запускаем обработку в отдельном потоке, чтобы быстро ответить VK
+            threading.Thread(target=process_vk_message, args=(message_data,)).start()
+            
+            return jsonify({'response': 'ok'})
+        
+        elif data.get('type') == 'message_event':
+            # Обработка callback кнопок
+            event_data = {
+                'user_id': data['object']['user_id'],
+                'peer_id': data['object']['peer_id'],
+                'event_id': data['object']['event_id'],
+                'conversation_message_id': data['object']['conversation_message_id'],
+                'payload': data['object']['payload']
+            }
+            
+            # Запускаем обработку в отдельном потоке
+            threading.Thread(target=process_vk_callback, args=(event_data,)).start()
+            
+            return jsonify({'response': 'ok'})
+        
+        elif data.get('type') == 'message_reply':
+            # Ответ на сообщение (для отправки сообщений через API)
+            return jsonify({'response': 'ok'})
+        
+        else:
+            # Для других типов событий просто отвечаем OK
+            return jsonify({'response': 'ok'})
+            
+    except Exception as e:
+        print(f"❌ Ошибка в вебхуке: {e}")
+        return jsonify({'response': 'error', 'message': str(e)}), 500
+
+def process_vk_message(message_data):
+    """Обработка сообщения VK в отдельном потоке"""
+    try:
+        message = Message(message_data, vk)
+        text = message_data.get('text', '').lower()
+        
+        # Обработка payload для кнопок
+        if 'payload' in message_data and message_data['payload']:
+            try:
+                payload = json.loads(message_data['payload'])
+                if 'cmd' in payload:
+                    handle_button_command(message, payload['cmd'], payload)
+                    return
+            except:
+                pass
+        
+        # Обработка текстовых команд через существующую функцию
+        handle_message_event(message_data)
+        
+    except Exception as e:
+        print(f"❌ Ошибка обработки сообщения: {e}")
+
+def process_vk_callback(event_data):
+    """Обработка callback кнопок VK в отдельном потоке"""
+    try:
+        # Создаем структуру данных для совместимости
+        message_data = {
+            'from_id': event_data['user_id'],
+            'user_id': event_data['user_id'],
+            'peer_id': event_data['peer_id'],
+            'payload': event_data.get('payload'),
+            'conversation_message_id': event_data.get('conversation_message_id'),
+            'event_id': event_data['event_id']
+        }
+        
+        message = Message(message_data, vk)
+        
+        # Подтверждаем callback
+        try:
+            vk.messages.sendMessageEventAnswer(
+                event_id=event_data['event_id'],
+                user_id=event_data['user_id'],
+                peer_id=event_data['peer_id'],
+                event_data=json.dumps({"type": "show_snackbar", "text": "✅ Обработано"})
+            )
+        except Exception as e:
+            print(f"❌ Ошибка подтверждения callback: {e}")
+        
+        # Обрабатываем callback
+        handle_callback_event(message_data)
+        
+    except Exception as e:
+        print(f"❌ Ошибка обработки callback: {e}")
+
+def handle_callback_event(event_data):
+    """Обработка callback событий"""
+    try:
+        user_id = event_data['user_id']
+        cmd = event_data.get('payload', {}).get('cmd')
+        
+        print(f"[CALLBACK] Получен callback: {cmd} от пользователя {user_id}")
+        
+        if cmd == 'join_race':
+            message = Message(event_data, vk)
+            join_race(message)
+            
+        elif cmd == 'leave_race':
+            message = Message(event_data, vk)
+            leave_race(message)
+            
+        elif cmd == 'login':
+            print(f"[LOGIN CALLBACK] Пользователь {user_id} подтверждает вход")
+            
+            if str(user_id) in database_login:
+                database_login[str(user_id)]['status'] = 'success'
+                print(f"[LOGIN CALLBACK] Статус изменен для {user_id}")
+                
+                import secrets
+                login_token = secrets.token_urlsafe(32)
+                database_login[str(user_id)]['login_token'] = login_token
+                
+                try:
+                    vk.messages.send(
+                        user_id=user_id,
+                        message=f"✅ Вход подтвержден!\n\n"
+                               f"Теперь вернитесь на сайт и введите ваш ID: {user_id}",
+                        random_id=0
+                    )
+                except Exception as e:
+                    print(f"[LOGIN CALLBACK] Ошибка отправки: {e}")
+                    
+    except Exception as e:
+        print(f"[CALLBACK] Ошибка: {e}")
 
 # =============================================================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -84,147 +238,7 @@ def save_car_color(user_id, car_id, color):
     save_data(users_data, USERS_DB_FILE)
 
 # =============================================================================
-# VK БОТ
-# =============================================================================
-
-def init_bot():
-    """Инициализировать бота"""
-    global longpoll, vk_session, vk
-    try:
-        vk_session = vk_api.VkApi(token=token)
-        vk = vk_session.get_api()
-        longpoll = VkBotLongPoll(vk_session, GROUP_ID)
-        print("✅ VK бот инициализирован")
-        return True
-    except Exception as e:
-        print(f"❌ Ошибка инициализации бота: {e}")
-        return False
-
-def run_bot():
-    """Запустить бота"""
-    print("🚀 Запуск бота VK...")
-    
-    while True:
-        try:
-            if not longpoll:
-                if not init_bot():
-                    time.sleep(10)
-                    continue
-            
-            for event in longpoll.listen():
-                if event.type == VkBotEventType.MESSAGE_NEW:
-                    handle_vk_message(event)
-                elif event.type == VkBotEventType.MESSAGE_EVENT:
-                    handle_vk_callback(event)
-                    
-        except Exception as e:
-            print(f"❌ Ошибка в боте: {e}")
-            time.sleep(5)
-            init_bot()
-
-def handle_vk_message(event):
-    """Обработка сообщений VK"""
-    try:
-        message_data = {
-            'from_id': event.obj.message['from_id'],
-            'peer_id': event.obj.message['peer_id'],
-            'text': event.obj.message['text'],
-            'conversation_message_id': event.obj.message.get('conversation_message_id'),
-            'id': event.obj.message.get('id'),
-        }
-        
-        if 'payload' in event.obj.message and event.obj.message['payload']:
-            message_data['payload'] = event.obj.message['payload']
-        
-        message = Message(message_data, vk)
-        text = event.obj.message['text'].lower() if event.obj.message['text'] else ""
-        
-        if 'payload' in event.obj.message and event.obj.message['payload']:
-            try:
-                payload = json.loads(event.obj.message['payload'])
-                if 'cmd' in payload:
-                    handle_button_command(message, payload['cmd'], payload)
-                    return
-            except:
-                pass
-
-        if event.obj.message.get('action'):
-            action_type = event.obj.message['action']['type']
-            if action_type == 'chat_invite_user':
-                new_member_id = event.obj.message['action']['member_id']
-                if new_member_id == -int(GROUP_ID):
-                    send_welcome_message(event)
-                    return
-        
-        handle_message_event(message_data)
-        
-    except Exception as e:
-        print(f"❌ Ошибка обработки сообщения: {e}")
-
-def send_welcome_message(event):
-    """Отправка приветственного сообщения"""
-    try:
-        chat_id = event.obj.message['chat_id']
-        
-        welcome_text = """@all 🏎️ ДОБРО ПОЖАЛОВАТЬ В ГОНОЧНЫЙ БОТ!
-
-Приветствую всех участников чата! 🎉
-
-Я — бот для организации захватывающих гонок и соревнований.
-
-🚀 ОСНОВНЫЕ ВОЗМОЖНОСТИ:
-• 🏎️ Создавать гонки прямо в чате
-• 🚗 Покупать и улучшать автомобили
-• ⚔️ Устраивать драг-рейсинг
-• 🏆 Создавать кланы и битвы кланов
-• 💼 Работать автомехаником или таксистом
-
-📋 КОМАНДЫ ДЛЯ ЧАТА:
-• "Гонка" - создать/присоединиться к гонке
-• "Меню" - показать главное меню
-• "Драг @игрок" - вызвать на драг-рейсинг
-• "Клан" - система кланов
-
-👤 ЛИЧНЫЕ СООБЩЕНИЯ:
-Для доступа к полному функционалу напишите мне в личные сообщения:
-[vk.me/gonka_bot|Написать боту]
-
-🎮 Удачи на треках! 🏁"""
-
-        keyboard = VkKeyboard(inline=True)
-        keyboard.add_button("🏎️ Создать гонку", VkKeyboardColor.POSITIVE, payload={'cmd': 'create_race'})
-        keyboard.add_line()
-        keyboard.add_button("📋 Команды", VkKeyboardColor.PRIMARY, payload={'cmd': 'show_commands'})
-        
-        vk.messages.send(
-            peer_id=event.obj['peer_id'],
-            message=welcome_text,
-            keyboard=keyboard.get_keyboard(),
-            random_id=0
-        )
-        
-    except Exception as e:
-        print(f"❌ Ошибка отправки приветствия: {e}")
-
-def handle_vk_callback(event):
-    """Обработка callback кнопок VK"""
-    try:
-        message_data = {
-            'from_id': event.object['user_id'],
-            'user_id': event.object['user_id'],
-            'peer_id': event.object['peer_id'],
-            'payload': event.object.get('payload'),
-            'conversation_message_id': event.object.get('conversation_message_id')
-        }
-        
-        message = Message(message_data, vk)
-        handle_callback_event(message_data)
-        
-    except Exception as e:
-        print(f"❌ Ошибка обработки callback: {e}")
-
-# =============================================================================
-# FLASK РОУТЫ
+# FLASK РОУТЫ ДЛЯ САЙТА
 # =============================================================================
 
 @app.route('/')
@@ -547,59 +561,20 @@ def logout():
     flash('Вы успешно вышли из системы!', 'success')
     return redirect(url_for('index'))
 
-# =============================================================================
-# АДМИН ФУНКЦИИ
-# =============================================================================
-
-def load_admin_data():
-    try:
-        with open('admin.json', 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {"moders": {"users_ids": []}}
-
-def save_admin_data(data):
-    with open('admin.json', 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-def is_admin(user_id):
-    try:
-        admin_data = load_admin_data()
-        return str(user_id) in admin_data.get('moders', {}).get('users_ids', [])
-    except Exception as e:
-        print(f"Ошибка проверки админа: {e}")
-        return False
-
-@app.route('/admin')
-def admin_dashboard():
-    user_id = session.get('user_id')
-    if not user_id or not is_admin(user_id):
-        flash('Доступ запрещен!', 'error')
-        return redirect(url_for('dashboard'))
-    return render_template('admin_dashboard.html')
+@app.route('/health')
+def health_check():
+    """Эндпоинт для проверки здоровья"""
+    return 'OK', 200
 
 # =============================================================================
 # ЗАПУСК ПРИЛОЖЕНИЯ
 # =============================================================================
 
-def start_bot_thread():
-    """Запустить бота в отдельном потоке"""
-    global bot_thread
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
-    print("🤖 Бот VK запущен в отдельном потоке")
-
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     
-    # Инициализация бота
-    print("🤖 Инициализация VK бота...")
-    if init_bot():
-        start_bot_thread()
-        print("✅ Бот VK запущен")
-    else:
-        print("⚠️ Бот VK не запущен, но веб-сайт работает")
-    
-    # Запуск Flask
     print(f"🌐 Запуск веб-сервера на порту {port}...")
+    print(f"🤖 ВК бот работает через вебхук: /vk-webhook")
+    print(f"✅ Для настройки вебхука в VK укажите URL: https://ваш-домен/vk-webhook")
+    
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
