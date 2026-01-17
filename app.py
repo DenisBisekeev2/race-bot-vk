@@ -53,18 +53,12 @@ import datetime
 # =============================================================================
 
 
-def init_bot():
-    """Инициализировать бота"""
-    global longpoll, vk_session, vk
-    try:
-        vk_session = vk_api.VkApi(token=token)
-        vk = vk_session.get_api()
-        longpoll = VkBotLongPoll(vk_session, GROUP_ID)
-        print("✅ VK бот инициализирован (LongPoll)")
-        return True
-    except Exception as e:
-        print(f"❌ Ошибка инициализации бота: {e}")
-        return False
+
+vk_session = vk_api.VkApi(token=token)
+vk = vk_session.get_api()
+longpoll = VkBotLongPoll(vk_session, GROUP_ID)
+print("✅ VK бот инициализирован (LongPoll)")
+        
 
 def run_bot():
     """Запустить бота в отдельном потоке"""
@@ -1664,12 +1658,8 @@ def handle_backup_command(message):
 # ЗАПУСК ПРИЛОЖЕНИЯ
 # =============================================================================
 
-def start_bot_thread():
-    """Запустить бота в отдельном потоке"""
-    global bot_thread
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
-    print("🤖 Бот VK запущен в отдельном потоке")
+
+    
 
 if __name__ == '__main__':
     import os
@@ -1690,9 +1680,11 @@ if __name__ == '__main__':
 
     # ПОТОМ инициализируем бота (это может занять время)
     print("🤖 Инициализация VK бота...")
-    init_bot()
     
-    start_bot_thread()
+    
+    bot_thread = threading.Thread(target=run_bot, daemon=True)
+    bot_thread.start()
+    print("🤖 Бот VK запущен в отдельном потоке")
     
     print("✅ Бот VK запущен")
     
