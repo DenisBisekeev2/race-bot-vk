@@ -1691,12 +1691,12 @@ if __name__ == '__main__':
         import traceback
         traceback.print_exc()
     
-    print(f"🌐 Запуск веб-сервера на порту {port}...")
+    print(f"🌐 Запуск веб-сервера на порту 5000...")
     
     # Запускаем Flask синхронно
     app.run(
         host='0.0.0.0', 
-        port=port, 
+        port=5000, 
         debug=False, 
         use_reloader=False,
         threaded=True
