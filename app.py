@@ -52,7 +52,19 @@ vk_session = vk_api.VkApi(token=token)
 vk = vk_session.get_api()
 longpoll = VkBotLongPoll(vk_session, GROUP_ID)
 print("✅ VK бот инициализирован (LongPoll)")
-        
+
+def init_bot():
+    """Инициализировать бота"""
+    global longpoll, vk_session, vk
+    try:
+        vk_session = vk_api.VkApi(token=token)
+        vk = vk_session.get_api()
+        longpoll = VkBotLongPoll(vk_session, GROUP_ID)
+        print("✅ VK бот инициализирован (LongPoll)")
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка инициализации бота: {e}")
+        return False
 
 def run_bot():
     """Запустить бота в отдельном потоке"""
