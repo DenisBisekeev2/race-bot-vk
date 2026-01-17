@@ -575,6 +575,6 @@ if __name__ == '__main__':
     
     print(f"🌐 Запуск веб-сервера на порту {port}...")
     print(f"🤖 ВК бот работает через вебхук: /vk-webhook")
-    print(f"✅ Для настройки вебхука в VK укажите URL: https://ваш-домен/vk-webhook")
+    print(f"✅ Для настройки вебхука в VK укажите URL: https://racebotvk.onrender.com/vk-webhook")
     
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
